@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Documentos recibidos · InmoVeritas{% endblock %}
+{% block content %}
+<h1>{% if just_sent %}Documentos recibidos{% else %}Este enlace ya fue utilizado{% endif %}</h1>
+<div class="alert ok">Expediente <b>{{ meta.exp_id }}</b>: el envío fue registrado y el análisis inició automáticamente. El equipo legal de Tiendas 3B revisará el resultado.</div>
+<p class="muted">Conserve este identificador como comprobante. Si algún archivo requiere ser reemplazado, el equipo se pondrá en contacto.</p>
+{% endblock %}

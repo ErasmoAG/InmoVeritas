@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}InmoVeritas{% endblock %}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="top"><div class="brand">InmoVeritas <b>3B</b></div>
+{% if user is defined and user %}<nav><a href="/panel">Expedientes</a><a href="/panel/reglas">Reglas</a></nav><div class="sp"></div><span class="muted" style="color:#ddd">{{ user }}</span><a href="/panel/logout" style="color:#fff">Salir</a>
+{% else %}<div class="sp"></div><span style="font-size:13px;opacity:.8">Recepción segura de documentos</span>{% endif %}</header>
+<main>{% block content %}{% endblock %}</main></body></html>

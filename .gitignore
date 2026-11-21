@@ -1,0 +1,39 @@
+# --- Secretos y claves (NUNCA subir) ---
+.env
+.env.*
+!.env.example
+*.key
+*.key.json
+*.pem
+ALTA_TOTP_*.png
+
+# --- Datos del expediente y del reto (confidenciales: no salen del equipo) ---
+storage/*
+!storage/.gitkeep
+work/
+contexto/
+*.enc
+users.json
+purge_receipts.jsonl
+rules_history.jsonl
+rules_backups/
+
+# --- Entorno y cachés de Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# --- Editor / sistema / logs ---
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+*.log

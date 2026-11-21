@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block title %}Acceso · InmoVeritas{% endblock %}
+{% block content %}
+<div style="max-width:420px;margin:30px auto">
+<h1>Panel del abogado</h1>
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+{% if not has_users %}<div class="alert warn">Aún no existe una cuenta. Créela con: <code>python scripts/create_user.py</code></div>{% endif %}
+{% if stage == 'pwd' or stage == 'full' %}
+<div class="card"><b>Paso 2 de 2 · Verificación en dos pasos</b><p class="muted">Escriba el código de 6 dígitos de su aplicación de autenticación.</p>
+<form method="post" action="/panel/mfa"><label for="code">Código</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" autofocus required><br><br><button>Verificar</button></form></div>
+{% else %}
+<div class="card"><b>Paso 1 de 2 · Usuario y contraseña</b>
+<form method="post" action="/panel/login"><label for="u">Usuario</label><input id="u" name="username" autocomplete="username" required autofocus><label for="p">Contraseña</label><input id="p" name="password" type="password" autocomplete="current-password" required><br><br><button>Continuar</button></form></div>
+{% endif %}</div>
+{% endblock %}

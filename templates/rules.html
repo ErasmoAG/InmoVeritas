@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Reglas · InmoVeritas{% endblock %}
+{% block content %}
+<h1>Reglas configurables</h1>
+<p class="muted">Versión aplicada: <b>{{ ref.version }}</b> · huella {{ ref.sha256[:16] }}… · cargadas {{ ref.loaded_at[:19].replace('T',' ') }}. Los valores vacíos significan «sin criterio oficial»: el sistema los marca como pendientes y no inventa reglas.</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}{% if err %}<div class="alert err"><pre style="margin:0;white-space:pre-wrap">{{ err }}</pre></div>{% endif %}
+<form method="post"><textarea name="text" rows="30" style="font-family:Consolas,monospace;font-size:13px">{{ text }}</textarea><br><br><button>Validar y guardar</button> <span class="muted">Si el YAML tiene errores no se guarda nada.</span></form>
+<h2>Historial de actualizaciones</h2>{% if history %}<table><tr><th>Fecha</th><th>Usuario</th><th>Versión</th><th>Huella</th></tr>{% for h in history %}<tr><td>{{ h.updated_at }}</td><td>{{ h.actor }}</td><td>{{ h.version }}</td><td>{{ h.sha256[:16] }}…</td></tr>{% endfor %}</table>{% else %}<p class="muted">Sin actualizaciones registradas.</p>{% endif %}
+{% endblock %}

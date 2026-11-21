@@ -1,0 +1,126 @@
+# =============================================================================
+# InmoVeritas - Reglas configurables (Tiendas 3B)
+# -----------------------------------------------------------------------------
+# Este archivo se puede reemplazar o editar SIN tocar agentes ni backend.
+# Jerarquia de reglas (si hay contradiccion, gana la de menor numero):
+#   1. Documentos y reglas oficiales del comite organizador
+#   2. Criterios oficiales proporcionados para el reto
+#   3. Reglas adicionales confirmadas por Tiendas 3B
+#   4. Configuraciones provisionales del MVP
+# Los valores null o listas vacias significan: "sin criterio oficial todavia".
+# El sistema NO inventa tolerancias ni categorias juridicas: ante un valor null,
+# el resultado queda como "pendiente de revision", nunca como incumplimiento.
+# =============================================================================
+
+meta:
+  version: "0.1.0-provisional"
+  description: "Reglas iniciales del MVP; pendientes de contraste con la hoja oficial del comite"
+  source_priority:
+    - "oficial_comite"
+    - "criterio_oficial_reto"
+    - "confirmado_tiendas_3b"
+    - "provisional_mvp"
+
+rules:
+  property_types:
+    - store
+    - cedis
+
+  documents:
+    required:
+      - escrituras
+      - predial
+      - alineamiento_numero_oficial
+      - uso_suelo
+    # Que hacer si falta un documento requerido: requires_review | not_compliant
+    missing_document_outcome: "requires_review"
+    source: "Reto: expediente con 4 tipos documentales minimos"
+    level: "criterio_oficial_reto"
+
+  predial:
+    enabled: true
+    min_year: 2020
+    source: "Criterio informado por representante de Tiendas 3B"
+    level: "confirmado_tiendas_3b"
+    requires_committee_confirmation: true
+
+  # Vigencia: no se asume ninguna duracion. Solo se evalua si el propio
+  # documento declara una fecha de vigencia o vencimiento.
+  validity:
+    enabled: true
+    documents_with_validity:
+      - alineamiento_numero_oficial
+      - uso_suelo
+    default_validity_days: null
+    source: "Reto: 'fecha de emision y vigencia, cuando corresponda'"
+    level: "criterio_oficial_reto"
+
+  tolerances:
+    # Sin valor oficial: cualquier diferencia de superficie se reporta como
+    # "requiere revision" con ambos valores y su evidencia.
+    surface_difference_percent: null
+    surface_difference_m2: null
+    source: "Pendiente: tolerancia oficial del comite"
+    level: "provisional_mvp"
+
+  # Compatibilidad de uso de suelo por tipo de proyecto. Reglas SEPARADAS:
+  # no existe una regla generica unica para tienda y CEDIS.
+  land_use:
+    store:
+      allowed_categories: []     # completar solo con informacion oficial
+      restrictions: []           # completar solo con informacion oficial
+      # Terminos de busqueda provisionales (NO son categorias juridicas).
+      # Sirven solo para localizar evidencia textual en el documento.
+      provisional_hints:
+        positive: ["comercial", "comercio", "tienda", "abarrotes", "servicios", "mixto"]
+        negative: ["exclusivamente habitacional", "habitacional unifamiliar"]
+      source: "Configuracion provisional del MVP"
+      level: "provisional_mvp"
+      requires_committee_confirmation: true
+    cedis:
+      allowed_categories: []
+      restrictions: []
+      provisional_hints:
+        positive: ["industrial", "bodega", "almacenamiento", "almacen", "logistic", "distribucion"]
+        negative: ["exclusivamente habitacional", "habitacional unifamiliar", "solo comercial"]
+      source: "Configuracion provisional del MVP"
+      level: "provisional_mvp"
+      requires_committee_confirmation: true
+
+  # Comparaciones cruzadas entre documentos del mismo inmueble.
+  cross_checks:
+    address:         { enabled: true, severity_on_mismatch: "high" }
+    owner:           { enabled: true, severity_on_mismatch: "high" }
+    surface:         { enabled: true, severity_on_mismatch: "medium" }
+    official_number: { enabled: true, severity_on_mismatch: "high" }
+    parcel_id:       { enabled: true, severity_on_mismatch: "high" }
+
+  validation:
+    require_evidence: true
+    unknown_data_status: "pending"
+    missing_data_status: "requires_review"
+    min_extraction_confidence: 0.5
+
+  # Clasificacion de hallazgos (gravedad por tipo de hallazgo)
+  finding_classification:
+    missing_required_document: "high"
+    predial_year_below_min: "high"
+    predial_year_unknown: "medium"
+    document_expired: "high"
+    validity_unknown: "low"
+    land_use_incompatible: "high"
+    land_use_undetermined: "medium"
+    inconsistency: "medium"
+    unreadable_document: "medium"
+    evidence_not_verified: "medium"
+
+  # Criterios de recomendacion
+  recommendation:
+    # Hallazgos que, de estar confirmados y auditados, producen "No cumple"
+    not_compliant_if_any:
+      - predial_year_below_min
+      - document_expired
+      - land_use_incompatible
+    # "Cumple" exige: sin incumplimientos, sin pendientes y evidencia verificada
+    compliant_requires_no_pending: true
+    default: "requires_review"

@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block content %}
+<h1>Purga {{ 'completada' if receipt.status == 'completa' else 'incompleta' }}</h1>
+<div class="alert {{ 'ok' if receipt.status == 'completa' else 'warn' }}">Expediente <b>{{ receipt.expediente }}</b>: {{ receipt.files_deleted }} archivo(s) eliminados · clave de cifrado {{ 'destruida' if receipt.key_destroyed else 'NO destruida' }}.</div>
+{% if receipt.pending %}<div class="alert err"><b>Pendiente:</b><ul>{% for p in receipt.pending %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+<p class="muted">Constancia {{ receipt.purge_id }} · {{ receipt.purged_at }}. La constancia no contiene datos personales ni contenido documental. {{ receipt.notice }}</p>
+<a class="btn" href="/panel">Volver a expedientes</a>
+{% endblock %}

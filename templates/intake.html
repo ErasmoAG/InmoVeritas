@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Envío de documentos · InmoVeritas{% endblock %}
+{% block content %}
+<h1>Envío de documentos del inmueble</h1>
+<p class="muted">Referencia del enlace: <b>{{ meta.exp_id }}</b>{% if meta.reference %} · {{ meta.reference }}{% endif %}</p>
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+<div class="help"><b>Cómo enviar:</b> 1) Indique el tipo de proyecto. 2) Adjunte los documentos (Escrituras, Predial, Alineamiento y Número Oficial, Uso de Suelo) como PDF, fotos o un ZIP; puede subirlos por separado o juntos.
+3) Revise qué archivos fueron aceptados y corrija los rechazados. 4) Envíe el formulario. Los archivos se cifran al recibirse. Aquí solo se revisa que el archivo se pueda leer; la revisión legal la hace el equipo de Tiendas 3B.</div>
+<form id="f" method="post" action="/r/{{ token }}/enviar">
+<div class="row"><div><label for="applicant">Nombre de la persona o empresa interesada (opcional)</label><input id="applicant" name="applicant" maxlength="120" autocomplete="organization"></div>
+<div><label for="pt">Tipo de proyecto *</label><select id="pt" name="project_type" required><option value="">Seleccione…</option><option value="store">Tienda comercial</option><option value="cedis">Centro de Distribución (CEDIS)</option></select></div></div>
+<label>Documentos requeridos</label>
+<div class="muted">Escrituras · Predial · Alineamiento y Número Oficial · Uso de Suelo</div>
+<div class="drop" style="margin-top:8px"><input type="file" id="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.heic,.heif,.zip" style="display:none">
+<button type="button" class="sec" onclick="document.getElementById('files').click()">Elegir archivos</button> <span class="muted">o tome una foto del documento con su celular · PDF, JPG, PNG, WEBP, TIFF, HEIC o ZIP</span>
+<div class="bar" id="bar" style="margin-top:12px;display:none"><i id="barfill"></i></div><div class="muted" id="state"></div>
+<button type="button" class="sec" id="cancel" style="display:none;margin-top:8px">Cancelar carga</button></div>
+<h2>Archivos</h2><div id="list" class="muted">Aún no ha cargado archivos.</div>
+<div style="margin-top:20px"><button id="send" type="submit" disabled>Enviar documentos</button> <span class="muted" id="hint">Cargue al menos un archivo válido y elija el tipo de proyecto.</span></div>
+</form>
+<script>window.TOKEN="{{ token }}";</script><script src="/static/intake.js"></script>
+{% endblock %}
