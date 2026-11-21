@@ -156,3 +156,34 @@ def test_los_tres_veredictos_se_conservan():
 def test_baja_confianza_se_advierte():
     p = presenter.build(result(FOUR, verdict="requiere_revision", confidence=0.4))
     assert "confianza del análisis es baja" in p["final_text"]
+
+
+# ------------------------------------------------------------- mensaje para compartir
+def test_mensaje_para_compartir_en_lista_por_documento_y_sin_jerga():
+    f_sup = finding("C-01", "inconsistency", "x", found="Escrituras: 500 m2", compared="Predial: 450", rule="cross_checks.surface",
+                    evidence=[ev("e", "e.pdf", 3, "500"), ev("p", "p.pdf", 1, "450")])
+    f_year = finding("V-01", "predial_year_below_min", "x", "high", file_id="p", filename="p.pdf", found="2019", compared="mínimo 2020", rule="predial.min_year",
+                     evidence=[ev("p", "p.pdf", 1, "2019")])
+    f_low = finding("V-09", "validity_unknown", "Uso de Suelo: no se identificó vigencia.", "low")
+    docs = [doc("e", "escrituras"), doc("p", "predial"), doc("x", "desconocido", "foto_borrosa.jpg", unreadable=(1,), has_text=False)]
+    p = presenter.build(result(docs, [f_sup, f_year, f_low, finding("V-02", "missing_required_document", "Falta", "high")]))
+    msg = p["share"]
+    assert msg.startswith("Hola, revisamos tus documentos")
+    lines = msg.split("\n")
+    assert "- Alineamiento y Número Oficial" in lines and "- Uso de Suelo" in lines and lines.index("*Documentos que faltan*") < lines.index("*Predial*")
+    assert lines[lines.index("*Predial*") + 1] == "- Es del año 2019. Envía uno del 2020 o más reciente."
+    cross = lines[lines.index("*Datos que no coinciden entre documentos*") + 1]
+    assert cross == "- La superficie no coincide: Escrituras dice «500 m2» y Predial dice «450». Confirma cuál es el correcto."
+    assert "foto_borrosa.jpg: No se pudo leer" in msg
+    assert "vigencia" not in msg.lower()                               # lo menor no se pide al cliente
+    assert msg.rstrip().endswith("Gracias.") and "%" not in msg and "confianza" not in msg.lower()
+    low = msg.lower()
+    for w in JARGON + ["agente", "regla"]:
+        assert w not in low, w
+
+
+def test_mensaje_para_compartir_cuando_todo_esta_bien_y_no_modifica_el_resultado():
+    r = result(FOUR, verdict="cumple")
+    before = copy.deepcopy(r)
+    assert presenter.build(r)["share"] == "Hola, revisamos tus documentos y todo está en orden. ¡Gracias!"
+    assert r == before

@@ -105,7 +105,7 @@ def _finding_item(result: dict, f: dict, project: Optional[str]) -> Optional[dic
     if f.get("file_id"):
         dtypes.add(_doc_type_of(result, f.get("file_id"), f.get("filename")))
     base = {"id": f.get("finding_id"), "severity": f.get("severity", "medium"), "docs": refs, "evidence": _evidence(result, f),
-            "confidence": f.get("confidence"), "audit": f.get("audit_status"), "found": found, "compared": compared, "type": t,
+            "confidence": f.get("confidence"), "audit": f.get("audit_status"), "found": found, "compared": compared, "type": t, "rule": f.get("rule"),
             "document_types": sorted(x for x in dtypes if x in DOC_ORDER)}
     if t == "missing_required_document":
         return None  # se muestra en la sección "Documentos faltantes"
@@ -201,6 +201,64 @@ def _req_doc_type(req_id: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+_FIELD_NOUN = {"surface": "La superficie", "owner": "El nombre del propietario", "address": "La dirección", "parcel_id": "La clave del predio"}
+
+
+def _client_line(i: dict) -> str:
+    """Una linea corta y clara para la persona que envio los documentos."""
+    t = i.get("type")
+    if t == "unreadable":
+        return "No se pudo leer. Súbelo de nuevo con una foto o un escaneo más claro."
+    if t == "predial_year_below_min":
+        m = re.search(r"(\d{4})", i.get("compared") or "")
+        return f"Es del año {i.get('found')}. Envía uno del {m.group(1)} o más reciente." if m else f"Es del año {i.get('found')}. Envía uno más reciente."
+    if t == "predial_year_unknown":
+        return "No se alcanza a ver el año. Envía una copia más clara."
+    if t == "document_expired":
+        return f"La vigencia ya venció ({i.get('found')}). Envía uno vigente."
+    if t == "land_use_incompatible":
+        return "El uso de suelo no permite el proyecto indicado. Revisa con quien lo emitió."
+    if t == "land_use_undetermined":
+        return "No queda claro si el uso de suelo permite el proyecto. Envía el documento completo y legible."
+    if t == "inconsistency":
+        da, va = _split_doc_value(i.get("found"))
+        db, vb = _split_doc_value(i.get("compared"))
+        noun = _FIELD_NOUN.get((i.get("rule") or "").split(".")[-1], "Un dato")
+        return f"{noun} no coincide: {da or 'un documento'} dice «{va}» y {db or 'otro documento'} dice «{vb}». Confirma cuál es el correcto."
+    return i.get("title", "") + "."
+
+
+def share_message(items: list[dict], missing: list[str], verdict: str) -> str:
+    """Texto breve, en lista y separado por documento, para compartir por WhatsApp o correo. Solo usa lo ya calculado."""
+    by_doc: dict[str, list[str]] = {}
+    cross, unread = [], []
+    for i in items:
+        if i["severity"] == "low" or i.get("type") in ("unverified", "low_quality"):
+            continue                      # observaciones menores: no se piden al cliente
+        line = _client_line(i)
+        if i.get("type") == "inconsistency":
+            cross.append(line)
+        elif i.get("type") == "unreadable":
+            unread.append(f"{i.get('filename') or 'Un archivo'}: {line}")
+        else:
+            label = (i["docs"][0]["label"] if i.get("docs") else "Otros")
+            by_doc.setdefault(label, []).append(line)
+    if not (missing or by_doc or cross or unread):
+        return "Hola, revisamos tus documentos y todo está en orden. ¡Gracias!" if verdict == "cumple" else "Hola, revisamos tus documentos y estamos terminando la revisión. Te avisamos si necesitamos algo más. ¡Gracias!"
+    out = ["Hola, revisamos tus documentos. Para continuar necesitamos lo siguiente:"]
+    if missing:
+        out += ["", "*Documentos que faltan*"] + [f"- {m}" for m in missing]
+    for label in [DOC_LABEL[t] for t in DOC_ORDER] + [k for k in by_doc if k not in DOC_LABEL.values()]:
+        if label in by_doc:
+            out += ["", f"*{label}*"] + [f"- {l}" for l in by_doc[label]]
+    if unread:
+        out += ["", "*Archivos que no se pudieron leer*"] + [f"- {l}" for l in unread]
+    if cross:
+        out += ["", "*Datos que no coinciden entre documentos*"] + [f"- {l}" for l in cross]
+    out += ["", "Gracias."]
+    return "\n".join(out)
+
+
 def _clean(text: str) -> str:
     """Quita referencias internas (reglas, MVP, comité) y palabras técnicas de textos escritos por otros agentes."""
     t = re.sub(r"\s*\((?:criterio provisional|regla provisional)[^)]*\)", "", text or "")
@@ -228,7 +286,7 @@ def build(result: dict, meta: Optional[dict] = None) -> dict:
     for d in unreadable:
         pages = d.get("unreadable_pages") or []
         where = f" (páginas {', '.join(map(str, pages))})" if pages else ""
-        items.append({"id": f"L-{d['file_id'][:4]}", "severity": "medium", "type": "unreadable", "title": "Una imagen está borrosa o no se puede leer",
+        items.append({"id": f"L-{d['file_id'][:4]}", "severity": "medium", "type": "unreadable", "filename": d["filename"], "title": "Una imagen está borrosa o no se puede leer",
                       "text": f"El archivo «{d['filename']}»{where} no se puede leer correctamente. No se tomó ningún dato de esa parte para no equivocarnos.",
                       "why": "Sin poder leerlo no se puede comprobar su contenido.", "recommendation": "Cargar una fotografía o un escaneo más claro del documento.",
                       "docs": [{"label": DOC_LABEL.get(d["doc_type"], d["filename"]), "page": pages[0] if pages else None}], "evidence": [], "confidence": None, "audit": None,
@@ -353,5 +411,5 @@ def build(result: dict, meta: Optional[dict] = None) -> dict:
     return {"verdict": verdict, "verdict_label": VERDICT_LABEL[verdict], "confidence": rec.get("confidence"), "summary": summary, "final_text": final.strip(),
             "documents": cards, "findings": items, "main": [i for i in items if i["severity"] in ("high", "medium")], "minor": [i for i in items if i["severity"] == "low"],
             "missing": miss, "problem_docs": [c for c in cards if c["status"] != "correcto"], "ok_docs": [c for c in cards if c["status"] == "correcto"],
-            "requirements": reqs, "data": data, "counts": {"ok": sum(c["status"] == "correcto" for c in cards), "problems": sum(c["status"] not in ("correcto", "faltante") for c in cards),
+            "share": share_message(items, [DOC_LABEL[t] for t in missing], verdict), "requirements": reqs, "data": data, "counts": {"ok": sum(c["status"] == "correcto" for c in cards), "problems": sum(c["status"] not in ("correcto", "faltante") for c in cards),
                                                            "missing": len(miss)}, "disclaimer": rec.get("disclaimer", "")}

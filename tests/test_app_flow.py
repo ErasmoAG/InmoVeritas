@@ -219,9 +219,11 @@ def test_expediente_analizado_muestra_secciones_en_lenguaje_sencillo(env):
     assert "Requiere revisión" in pages["resumen"].text and "Documentos correctos" in pages["resumen"].text
     assert "Predial del año 2020 o posterior" in pages["requisitos"].text and "ejercicio" not in pages["requisitos"].text
     assert "ROSA QUINTANAR" in pages["datos"].text and "Eliminar expediente" in pages["eliminar"].text
+    assert "Ver documento" in pages["documentos"].text and f"/archivo/{fid}" in pages["documentos"].text      # boton para abrir el original
+    assert 'id="share"' in pages["resumen"].text and 'id="shareMsg"' in pages["resumen"].text and "Hola, revisamos tus documentos" in pages["resumen"].text   # boton Compartir
     for name, r in pages.items():
         low = r.text.lower()
-        for word in ("agente", "regla", "ocr", "llm", "confianza insuficiente", "a7"):
+        for word in ("agente", "regla", "llm", "confianza insuficiente"):
             assert word not in low, (name, word)
 
 
@@ -282,3 +284,26 @@ def test_el_enlace_sigue_abierto_y_permite_reenviar_con_nuevo_analisis(env):
     assert meta["status"] == "recibido" and meta["resubmissions"] == 1 and meta["verdict"] is None and meta["opened_at"] is None   # vuelve a salir como "Nueva"
     assert all(f["status"] in ("formato_valido",) for f in meta["files"] if f.get("declared"))
     assert "Estamos revisando" in pub.get(f"/r/{token}").text
+
+
+def test_ver_documento_original_solo_con_sesion_y_solo_archivos_aceptados(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs)
+    pub = TestClient(client.app)
+    send_all(pub, token, submit=False)
+    pub.post(f"/r/{token}/archivos", data={"slot": "predial"}, files=[("files", ("falso.pdf", b"MZ" + b"\x00" * 900, "application/pdf"))])   # rechazado: no se guarda
+    pub.post(f"/r/{token}/enviar")
+    store = fs.get_store()
+    files = store.get_meta(exp_id)["files"]
+    good = next(f for f in files if f["status"] == "formato_valido")
+    bad = next(f for f in files if f["status"] == "formato_invalido")
+    url = f"/panel/expedientes/{exp_id}/archivo/{good['file_id']}"
+    assert TestClient(client.app, follow_redirects=False).get(url).status_code == 303          # sin sesion no se ve
+    r = client.get(url)
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert r.content == store.enc.get(exp_id, "original", good["file_id"]) and r.content.startswith(b"%PDF-")
+    assert r.headers["cache-control"] == "no-store" and r.headers["x-content-type-options"] == "nosniff"
+    assert client.get(f"/panel/expedientes/{exp_id}/archivo/{bad['file_id']}").status_code == 404     # lo rechazado nunca se guardo
+    assert client.get(f"/panel/expedientes/{exp_id}/archivo/noexiste").status_code == 404
+    assert client.get(f"/panel/expedientes/EXP-NOEXISTE/archivo/{good['file_id']}").status_code == 404

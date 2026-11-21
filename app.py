@@ -272,10 +272,41 @@ def detail(request: Request, exp_id: str, user: str = Depends(lawyer), s: str = 
     if s not in {k for k, _ in SECTIONS}:
         s = "resumen"
     state, color = STATE_LABEL.get(meta["status"], (meta["status"], "gris"))
-    files = [{**f, "label": FILE_LABEL.get(f["status"], f["status"]), "slot": next((t for k, t, _ in SLOTS if k == f.get("declared")), "—")} for f in meta["files"]]
+    files = [{**f, "label": FILE_LABEL.get(f["status"], f["status"]), "slot": next((t for k, t, _ in SLOTS if k == f.get("declared")), "—"),
+              "can_view": f["status"] in ("formato_valido", "analizado", "ilegible")} for f in meta["files"]]
     return templates.TemplateResponse(request, "detail.html", {"user": user, "nav": "expedientes", "meta": meta, "p": plain, "section": s, "sections": SECTIONS, "state": state, "state_color": color,
                                                                "files": files, "error": error, "link": _link(request, exp_id) if meta["status"] == "esperando" else None,
                                                                "timing": round(result["timings_ms"]["total"] / 1000) if result else None})
+
+
+VIEWABLE = {"pdf": "application/pdf", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
+@app.get("/panel/expedientes/{exp_id}/archivo/{file_id}")
+def view_file(exp_id: str, file_id: str, user: str = Depends(lawyer)):
+    """Muestra el documento ORIGINAL tal como lo envio la persona. Se descifra en memoria solo para esta respuesta."""
+    store = get_store()
+    if not store.enc.has_key(exp_id):
+        raise HTTPException(404, "Este expediente no existe o ya fue eliminado.")
+    rec = next((f for f in store.get_meta(exp_id)["files"] if f["file_id"] == file_id and f["status"] in ("formato_valido", "analizado", "ilegible")), None)
+    if not rec:
+        raise HTTPException(404, "No se encontró ese documento.")
+    try:
+        data = store.enc.get(exp_id, "original", file_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "No se encontró ese documento.")
+    fmt = rec.get("format")
+    if fmt not in VIEWABLE:   # TIFF y HEIC no se ven en el navegador: se muestran convertidos a imagen (solo la primera pagina)
+        import io
+        from PIL import Image
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        with Image.open(io.BytesIO(data)) as im:
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, "PNG")
+        data, fmt = buf.getvalue(), "png"
+    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline"}
+    return Response(data, media_type=VIEWABLE[fmt], headers=headers)
 
 
 @app.get("/panel/expedientes/{exp_id}/estado.json")

@@ -31,7 +31,9 @@ if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.re
 
 {% elif p %}
 <div class="exp">
-  <nav class="submenu">{% for key, label in sections %}<a href="?s={{ key }}" class="{{ 'on' if section == key }}"><span>{{ label }}</span>{% if key == 'observaciones' and p.main %}<span class="cnt">{{ p.main|length }}</span>{% endif %}</a>{% endfor %}</nav>
+  <div class="subcol"><nav class="submenu">{% for key, label in sections %}<a href="?s={{ key }}" class="{{ 'on' if section == key }}"><span>{{ label }}</span>{% if key == 'observaciones' and p.main %}<span class="cnt">{{ p.main|length }}</span>{% endif %}</a>{% endfor %}</nav>
+    <button type="button" class="btn sec sm" id="share" style="width:100%;margin-top:10px">{{ icon('share') }} <span>Compartir</span></button>
+    <script type="application/json" id="shareMsg">{{ p.share|tojson }}</script></div>
   <div>
   {% if section == 'resumen' %}
     {% set vc = {'cumple':'verde','requiere_revision':'ambar','no_cumple':'rojo'}[p.verdict] %}
@@ -56,8 +58,8 @@ if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.re
       {% if c.reasons %}<ul>{% for x in c.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}</div>{% endfor %}</div>
     <p class="small" style="margin-top:10px">«Correcto» significa que no se encontraron problemas al revisar el contenido; no basta con que el archivo se haya recibido.</p>
     <div class="card" style="margin-top:18px"><h2>Archivos recibidos</h2>
-      <table><thead><tr><th>Archivo</th><th>Lugar donde lo subieron</th><th>Estado</th></tr></thead><tbody>
-      {% for f in files %}<tr><td>{{ f.name }}</td><td>{{ f.slot }}</td><td><span class="pill {{ {'formato_valido':'verde','analizado':'verde','ilegible':'rojo','duplicado':'ambar','formato_invalido':'rojo'}.get(f.status,'gris') }}">{{ f.label }}</span></td></tr>{% endfor %}
+      <table><thead><tr><th>Archivo</th><th>Lugar donde lo subieron</th><th>Estado</th><th></th></tr></thead><tbody>
+      {% for f in files %}<tr><td>{{ f.name }}</td><td>{{ f.slot }}</td><td><span class="pill {{ {'formato_valido':'verde','analizado':'verde','ilegible':'rojo','duplicado':'ambar','formato_invalido':'rojo'}.get(f.status,'gris') }}">{{ f.label }}</span></td><td style="text-align:right">{% if f.can_view %}<a class="btn sec sm" href="/panel/expedientes/{{ meta.exp_id }}/archivo/{{ f.file_id }}" target="_blank" rel="noopener">{{ icon('file') }} Ver documento</a>{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
 
   {% elif section == 'requisitos' %}
@@ -84,4 +86,7 @@ if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.re
   </div>
 </div>
 {% endif %}
+{% if p %}<script>(function(){var b=document.getElementById('share');if(!b)return;var msg=JSON.parse(document.getElementById('shareMsg').textContent);
+b.onclick=function(){var done=function(){var s=b.querySelector('span');s.textContent='¡Mensaje copiado!';setTimeout(function(){s.textContent='Compartir'},1800)};
+if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(msg).then(done)}else{var a=document.createElement('textarea');a.value=msg;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}};})();</script>{% endif %}
 {% endblock %}
