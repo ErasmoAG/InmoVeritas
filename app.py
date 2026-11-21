@@ -1,10 +1,11 @@
-"""InmoVeritas - aplicacion web (FastAPI). Dos interfaces independientes pero conectadas:
+"""Cotejo - aplicacion web (FastAPI). Dos interfaces independientes pero conectadas:
   /r/{token}  formulario publico: solo 4 documentos para subir (quien vende o entrega los papeles)
   /panel/...  panel privado de Tiendas 3B (contrasena + codigo de verificacion)
 Ejecutar:  uvicorn app:app --host 127.0.0.1 --port 8000"""
 from __future__ import annotations
 
 import base64
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 from typing import Optional
@@ -23,7 +24,16 @@ from services.form_service import get_store
 from services.purge_service import purge_expediente
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI(title="InmoVeritas", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def _lifespan(_app):
+    try:
+        get_store().resume_pending()   # retoma analisis interrumpidos por un reinicio
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(title="Cotejo", docs_url=None, redoc_url=None, lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
@@ -224,8 +234,7 @@ def link_ready(request: Request, exp_id: str, user: str = Depends(lawyer)):
     link = _link(request, exp_id)
     from urllib.parse import quote
     wa = "https://wa.me/?text=" + quote(f"Hola, para continuar con la revisión de su inmueble, suba sus documentos en este enlace: {link}")
-    local_only = any(h in link.split("/")[2] for h in ("127.0.0.1", "localhost", "[::1]"))
-    return templates.TemplateResponse(request, "link_ready.html", {"user": user, "nav": "nuevo", "meta": meta, "link": link, "wa": wa, "local_only": local_only})
+    return templates.TemplateResponse(request, "link_ready.html", {"user": user, "nav": "nuevo", "meta": meta, "link": link, "wa": wa})
 
 
 @app.get("/panel/qr/{exp_id}.png")
@@ -248,19 +257,7 @@ def expedientes(request: Request, user: str = Depends(lawyer), q: str = "", f: s
 
 
 SECTIONS = [("resumen", "Resumen"), ("observaciones", "Observaciones"), ("documentos", "Documentos"), ("requisitos", "Requisitos"), ("datos", "Datos del inmueble"),
-            ("seguridad", "Seguridad"), ("eliminar", "Eliminar")]
-
-
-def _security(exp_id: str) -> list[dict]:
-    enc = get_store().enc
-    d = enc.data_dir(exp_id)
-    files = [p for p in d.rglob("*") if p.is_file()] if d.exists() else []
-    plain = [p for p in files if p.suffix != ".enc"]
-    ok = bool(files) and not plain and enc.has_key(exp_id)
-    return [{"name": "Documentos protegidos", "ok": ok, "text": "Todos los archivos se guardan cifrados; no hay copias legibles." if ok else "No se pudo comprobar la protección."},
-            {"name": "Acceso verificado", "ok": True, "text": "Entraste con tu contraseña y el código de verificación."},
-            {"name": "Clave propia del expediente", "ok": enc.has_key(exp_id), "text": "Este expediente tiene su propia clave, guardada aparte de los archivos."},
-            {"name": "Eliminación", "ok": False, "text": "Este expediente no se ha eliminado. Puedes eliminarlo en la sección «Eliminar»."}]
+            ("eliminar", "Eliminar")]
 
 
 @app.get("/panel/expedientes/{exp_id}", response_class=HTMLResponse)
@@ -277,7 +274,7 @@ def detail(request: Request, exp_id: str, user: str = Depends(lawyer), s: str = 
     state, color = STATE_LABEL.get(meta["status"], (meta["status"], "gris"))
     files = [{**f, "label": FILE_LABEL.get(f["status"], f["status"]), "slot": next((t for k, t, _ in SLOTS if k == f.get("declared")), "—")} for f in meta["files"]]
     return templates.TemplateResponse(request, "detail.html", {"user": user, "nav": "expedientes", "meta": meta, "p": plain, "section": s, "sections": SECTIONS, "state": state, "state_color": color,
-                                                               "files": files, "security": _security(exp_id), "error": error, "link": _link(request, exp_id) if meta["status"] == "esperando" else None,
+                                                               "files": files, "error": error, "link": _link(request, exp_id) if meta["status"] == "esperando" else None,
                                                                "timing": round(result["timings_ms"]["total"] / 1000) if result else None})
 
 

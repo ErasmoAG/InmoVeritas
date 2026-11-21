@@ -1,4 +1,4 @@
-# InmoVeritas — revisión inicial de expedientes inmobiliarios (Tiendas 3B)
+# Cotejo (InmoVeritas) — revisión inicial de expedientes inmobiliarios (Tiendas 3B)
 
 Sistema multiagente (LangChain + LangGraph, modelo local con Ollama) que recibe documentos mediante un formulario compartible,
 los valida, los cifra, los analiza con 10 agentes especializados y presenta al abogado una recomendación inicial

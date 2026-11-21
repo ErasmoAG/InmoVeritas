@@ -29,6 +29,7 @@ def env(tmp_path, monkeypatch):
     # Se sustituye SOLO el analisis pesado; el evento y su suscripcion son los reales.
     monkeypatch.setattr(fs.ExpedienteStore, "run_analysis", lambda self, exp_id: calls.append(exp_id))
     from services import mfa_service as auth
+    auth._fails.clear()          # el bloqueo por intentos vive en memoria: cada prueba empieza limpia
     secret, _ = auth.create_user("abogado", "una-clave-larga-123")
     import app as appmod
     return TestClient(appmod.app, follow_redirects=False), secret, calls, fs
@@ -129,7 +130,7 @@ def test_nuevas_solicitudes_y_pantallas_del_panel_sin_jerga_ni_reglas(env):
     TestClient(client.app).post(f"/r/{token}/enviar")
     home = client.get("/panel").text
     assert "Nuevas por abrir" in home and "Familia López" in home and 'class="nuevo"' in home
-    assert 'class="nuevo">1<' in client.get("/panel/expedientes").text                    # aviso en el menu
+    assert 'class="nuevo"' in client.get("/panel/expedientes").text                       # aviso junto al boton
     ready = client.get(f"/panel/enlaces/{exp_id}")
     assert ready.status_code == 200 and "/panel/qr/" in ready.text and "wa.me" in ready.text
     assert client.get(f"/panel/qr/{exp_id}.png").content[:4] == b"\x89PNG"
@@ -201,7 +202,7 @@ def test_expediente_analizado_muestra_secciones_en_lenguaje_sencillo(env):
               "agent_log": [], "timings_ms": {"total": 40000}, "rules_reference": {"version": "1", "sha256": "a" * 64}}
     store.enc.put_json(exp_id, "resultado", "analisis", result)
     meta = store.get_meta(exp_id); meta.update(status="analizado", verdict="requiere_revision"); store.put_meta(exp_id, meta)
-    pages = {s: client.get(f"/panel/expedientes/{exp_id}?s={s}") for s in ("resumen", "observaciones", "documentos", "requisitos", "datos", "seguridad", "eliminar")}
+    pages = {s: client.get(f"/panel/expedientes/{exp_id}?s={s}") for s in ("resumen", "observaciones", "documentos", "requisitos", "datos", "eliminar")}
     assert all(r.status_code == 200 for r in pages.values())
     assert "Requiere revisión" in pages["resumen"].text and "Documentos correctos" in pages["resumen"].text
     assert "Predial del año 2020 o posterior" in pages["requisitos"].text and "ejercicio" not in pages["requisitos"].text
@@ -219,3 +220,23 @@ def test_reglas_invalidas_no_se_guardan_y_no_estan_en_el_menu(env):
     assert client.get("/panel/reglas").status_code == 200
     r = client.post("/panel/reglas", data={"text": "meta: {version: x}"})
     assert r.status_code == 400 and "errores de estructura" in r.text
+
+
+def test_analisis_interrumpido_por_reinicio_se_retoma_y_solicitud_en_espera_se_puede_eliminar(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs)
+    pub = TestClient(client.app)
+    pub.post(f"/r/{token}/archivos", data={"slot": "predial"}, files=[("files", ("p.pdf", tiny_pdf(), "application/pdf"))])
+    pub.post(f"/r/{token}/enviar")
+    time.sleep(0.3)
+    store = fs.get_store()
+    meta = store.get_meta(exp_id); meta["status"] = "en_analisis"; store.put_meta(exp_id, meta)   # asi queda si el servidor se apaga a la mitad
+    calls.clear()
+    assert store.resume_pending() == [exp_id]
+    time.sleep(0.3)
+    assert calls == [exp_id]
+    page = client.get(f"/panel/expedientes/{exp_id}").text           # en espera/analizando tambien hay boton para eliminar
+    assert "Eliminar solicitud" in page and 'name="confirm"' in page
+    assert client.post(f"/panel/expedientes/{exp_id}/eliminar", data={"confirm": "ELIMINAR"}).status_code == 200
+    assert not store.enc.has_key(exp_id)

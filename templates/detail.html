@@ -9,7 +9,11 @@
     {% if f.evidence %}{{ ev(f.evidence) }}{% else %}<p class="small">No hay un fragmento del documento para mostrar en este punto.</p>{% endif %}</details></div>{% endmacro %}
 {% block content %}
 <div class="pagehead"><div><p><a href="/panel/expedientes">← Expedientes</a></p><h1>{{ meta.applicant }}</h1>
-  <p>{{ PROJECT_LABELS.get(meta.project_type, '—') }} · {{ (meta.submitted_at or meta.created_at)[:10] }} · <span class="pill {{ state_color }}">{{ state }}</span></p></div></div>
+  <p>{{ PROJECT_LABELS.get(meta.project_type, '—') }} · {{ (meta.submitted_at or meta.created_at)[:10] }} · <span class="pill {{ state_color }}">{{ state }}</span></p></div>
+  {% if not p %}<button class="btn danger" type="button" onclick="document.getElementById('dlg2').showModal()">{{ icon('trash') }} Eliminar solicitud</button>{% endif %}</div>
+{% if not p %}<dialog id="dlg2"><h2>¿Eliminar esta solicitud?</h2><p class="muted">Se borrará todo de forma definitiva, incluidos los documentos que se hayan recibido.</p>
+  <form method="post" action="/panel/expedientes/{{ meta.exp_id }}/eliminar"><input type="hidden" name="confirm" value="ELIMINAR">
+    <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn sec" type="button" onclick="document.getElementById('dlg2').close()">Cancelar</button><button class="btn danger">Sí, eliminar</button></div></form></dialog>{% endif %}
 
 {% if meta.status == 'esperando' %}
 <div class="callout azul">{{ icon('clock') }}<div><b>Esperando los documentos.</b> {{ meta.applicant }} todavía no los ha enviado. Comparte el enlace o el código QR.</div></div>
@@ -66,9 +70,6 @@ if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.re
     {% for d in p.data %}<div class="card"><h3>{{ d.label }}</h3>
       {% if d.rows %}<dl class="kv">{% for r in d.rows %}<dt>{{ r.label }}</dt><dd>{{ r.value }}{% if r.fragment %}<details><summary>Ver en el documento{% if r.page %} (página {{ r.page }}){% endif %}</summary><div class="frag">{{ r.fragment }}</div></details>{% endif %}</dd>{% endfor %}</dl>
       {% else %}<p class="muted">{{ d.note }}</p>{% endif %}</div>{% endfor %}
-
-  {% elif section == 'seguridad' %}
-    <h2>Seguridad</h2><div class="card">{% for s in security %}<div class="item" style="cursor:default"><span class="pill {{ 'verde' if s.ok else 'gris' }}">{{ icon('check' if s.ok else 'info') }}</span><div class="t"><b>{{ s.name }}</b><span>{{ s.text }}</span></div></div>{% endfor %}</div>
 
   {% elif section == 'eliminar' %}
     <h2>Eliminar expediente</h2>

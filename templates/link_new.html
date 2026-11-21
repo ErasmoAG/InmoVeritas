@@ -4,7 +4,7 @@
 <div class="card" style="max-width:640px">
   {% if error %}<div class="callout rojo">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
   <form method="post" action="/panel/nuevo">
-    <div class="field"><label for="n">Nombre de la persona o empresa</label><input id="n" name="applicant" type="text" maxlength="120" required autofocus placeholder="Ej. Juan Pérez o Inmobiliaria Norte"><div class="hint">Sirve para que identifiques esta solicitud. Quien reciba el enlace no necesita escribirlo.</div></div>
+    <div class="field"><label for="n">Nombre de la persona o empresa</label><input id="n" name="applicant" type="text" maxlength="120" required autofocus placeholder="Ej. Juan Pérez o Inmobiliaria Norte"></div>
     <div class="field"><label>¿Para qué es el inmueble?</label>
       <div class="choice">
         <div><input type="radio" name="project_type" id="t1" value="store" required><label for="t1"><span>Tienda<small>Nueva tienda comercial</small></span></label></div>

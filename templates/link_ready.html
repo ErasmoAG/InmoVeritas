@@ -2,7 +2,6 @@
 {% block content %}
 <div class="pagehead"><div><h1>Enlace listo</h1><p>Compártelo con {{ meta.applicant }}.</p></div><a class="btn sec" href="/panel/nuevo">{{ icon('plus') }} Crear otra solicitud</a></div>
 <div class="callout verde">{{ icon('check') }}<div><b>La solicitud se creó.</b> Cuando {{ meta.applicant }} envíe los documentos, el análisis empieza solo y te avisaremos en «Nuevas».</div></div>
-{% if local_only %}<div class="callout ambar">{{ icon('info') }}<div>Este enlace solo abre en esta computadora. Para que otra persona lo use, el sistema debe estar publicado en internet o en la red de la empresa. Pide ayuda a Sistemas.</div></div>{% endif %}
 <div class="two">
   <div class="card"><h2>Enlace</h2>
     <div class="linkbox"><input type="text" id="lk" value="{{ link }}" readonly onclick="this.select()"><button class="btn" id="cp" type="button">{{ icon('copy') }} Copiar</button></div>

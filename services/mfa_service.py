@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from services.encryption_service import _load_master
 from settings import get_settings
 
-ISSUER = "InmoVeritas"
+ISSUER = "Cotejo"
 MAX_FAILS, LOCK_SECONDS = 5, 600
 _fails: dict[str, list[float]] = {}
 

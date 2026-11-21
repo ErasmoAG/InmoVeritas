@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Expedientes{% endblock %}
 {% block content %}
-<div class="pagehead"><div><h1>Expedientes</h1><p>Todas las solicitudes de Tiendas 3B.</p></div><a class="btn" href="/panel/nuevo">{{ icon('plus') }} Nueva solicitud</a></div>
+<div class="pagehead"><div><h1>Expedientes</h1><p>Todas las solicitudes de Tiendas 3B.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap">{% set n = new_count() %}<a class="btn {{ '' if n else 'sec' }}" href="/panel#nuevas">{{ icon('bell') }} Nuevas{% if n %} <span class="nuevo" style="background:#fff;color:var(--red)">{{ n }}</span>{% endif %}</a><a class="btn" href="/panel/nuevo">{{ icon('plus') }} Nueva solicitud</a></div></div>
 <form class="toolbar" method="get">
   <input type="search" name="q" value="{{ q }}" placeholder="Buscar por nombre">
   <select name="f" onchange="this.form.submit()">{% for k, v in [('', 'Todos'), ('nuevas', 'Nuevas por abrir'), ('analizando', 'Analizándose'), ('esperando', 'Esperando documentos'), ('cumple', 'Cumplen'), ('revisar', 'Requieren revisión'), ('no_cumple', 'No cumplen')] %}<option value="{{ k }}" {{ 'selected' if f == k }}>{{ v }}</option>{% endfor %}</select>

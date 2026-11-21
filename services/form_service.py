@@ -207,6 +207,13 @@ class ExpedienteStore:
             except Exception:
                 pass
 
+    def resume_pending(self) -> list[str]:
+        """Si el servidor se reinicio mientras se analizaba un expediente, el analisis se perdio: se retoma al arrancar."""
+        pending = [m["exp_id"] for m in self.list_metas() if m.get("status") in ("recibido", "en_analisis")]
+        for exp_id in pending:
+            threading.Thread(target=self.run_analysis, args=(exp_id,), daemon=True).start()
+        return pending
+
     def progress(self, exp_id: str) -> list[dict]:
         return _progress.get(exp_id, [])
 

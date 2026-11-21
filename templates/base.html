@@ -1,13 +1,12 @@
 {% from "_icons.html" import icon %}<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}InmoVeritas{% endblock %} · Tiendas 3B</title><link rel="stylesheet" href="/static/app.css"></head>
+<title>{% block title %}Cotejo{% endblock %} · Tiendas 3B</title><link rel="stylesheet" href="/static/app.css"></head>
 <body><div class="app">
 <aside class="side">
-  <div class="brand"><span class="mark">3B</span> InmoVeritas</div>
+  <div class="brand"><span class="mark">3B</span> Cotejo</div>
   <nav>
     <a href="/panel" class="{{ 'on' if nav == 'inicio' }}">{{ icon('home') }} Inicio</a>
     <a href="/panel/nuevo" class="{{ 'on' if nav == 'nuevo' }}">{{ icon('plus') }} Nueva solicitud</a>
-    <a href="/panel/expedientes?f=nuevas" class="{{ 'on' if nav == 'nuevas' }}">{{ icon('bell') }} Nuevas {% set n = new_count() %}{% if n %}<span class="nuevo">{{ n }}</span>{% endif %}</a>
     <a href="/panel/expedientes" class="{{ 'on' if nav == 'expedientes' }}">{{ icon('folder') }} Expedientes</a>
   </nav>
   <div class="user">{{ icon('lock') }} {{ user }}<br><a href="/panel/logout">Cerrar sesión</a></div>
