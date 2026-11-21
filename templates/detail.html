@@ -1,9 +1,9 @@
 {% extends "base.html" %}{% block title %}{{ meta.exp_id }} · InmoVeritas{% endblock %}
-{% macro ev(list) %}{% for e in list %}<details><summary>Evidencia: {{ e.filename }} · pág. {{ e.page or '?' }} · {% if e.verified %}verificada en el original{% elif e.verified == false %}NO verificada{% else %}sin verificar{% endif %}</summary><div class="frag">{{ e.fragment }}</div></details>{% endfor %}{% endmacro %}
+{% macro ev(list) %}{% for e in list %}<details><summary>Evidencia: {{ e.filename }} · pág. {{ e.page or '?' }} · {% if e.verified %}comprobada en el original{% elif e.verified == false %}NO comprobada{% else %}sin comprobar{% endif %}</summary><div class="frag">{{ e.fragment }}</div></details>{% endfor %}{% endmacro %}
+{% macro status_badge(s, label) %}<span class="badge {{ {'correcto':'b-ok','requiere_revision':'b-warn','pendiente':'b-warn','no_cumple':'b-err','ilegible':'b-err','faltante':'b-pend'}[s] }}">{{ label }}</span>{% endmacro %}
 {% block content %}
 <p><a href="/panel">← Volver a expedientes</a></p>
 <h1>{{ meta.exp_id }} <span class="muted" style="font-size:15px">· {{ meta.applicant or 'Sin nombre' }} · {{ PROJECT_LABELS.get(meta.project_type, '—') }}</span></h1>
-<div class="secbar">{% for s in security %}<div class="sec"><b><span class="dot {{ 'ok' if s.ok }}"></span>{{ s.name }}</b>{{ s.detail }}</div>{% endfor %}</div>
 
 {% if meta.status in ('recibido','en_analisis') %}
 <div class="card" id="live" style="margin-top:14px"><b>Análisis en curso…</b><div class="bar" style="margin:8px 0"><i style="width:60%"></i></div><ol id="steps" class="muted"></ol></div>
@@ -11,47 +11,58 @@
 document.getElementById('steps').innerHTML=(j.progress||[]).map(p=>`<li>${p.stage} <span class="muted">(${p.t}s)</span> ${p.detail||''}</li>`).join('');
 if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.reload();}else{setTimeout(tick,1500);}})();</script>
 {% elif meta.status == 'error' %}<div class="alert err">El análisis no pudo completarse: {{ meta.error }}. Revise que Ollama esté en ejecución y vuelva a intentarlo.</div>
-{% elif r %}
-{% set rec = r.recommendation %}
-<h2>Recomendación inicial</h2>
-<div class="card"><span class="verdict" style="background:{{ {'cumple':'var(--ok)','requiere_revision':'var(--warn)','no_cumple':'var(--err)'}[rec.verdict] }}">{{ VERDICT_LABEL[rec.verdict] }}</span>
-<span class="muted" style="margin-left:12px">Nivel de confianza: <b>{{ (rec.confidence*100)|int }} %</b> · Tiempo de análisis: {{ (r.timings_ms.total/1000)|round(1) }} s</span>
-<p><b>Motivo:</b> {{ rec.reason }}</p><p>{{ rec.explanation }}</p><p class="muted">{{ rec.disclaimer }}</p></div>
+{% elif r and p %}
 
-{% if rec.missing_documents %}<div class="alert warn"><b>Documentos faltantes:</b> {{ rec.missing_documents|join(', ') }}</div>{% endif %}
-{% for d in r.documents if d.unreadable_pages or not d.has_text %}<div class="alert err"><b>Imagen ilegible:</b> {{ d.filename }}{% if d.unreadable_pages %} — páginas {{ d.unreadable_pages|join(', ') }}{% endif %}. Solicite un nuevo escaneo o foto de ese documento.</div>{% endfor %}
+<h2>Situación general del expediente</h2>
+<div class="card"><span class="verdict" style="background:{{ {'cumple':'var(--ok)','requiere_revision':'var(--warn)','no_cumple':'var(--err)'}[p.verdict] }}">{{ p.verdict_label }}</span>
+<span class="muted" style="margin-left:12px">Confianza del análisis: <b>{{ (p.confidence*100)|int }} %</b> · Tiempo de análisis: {{ (r.timings_ms.total/1000)|round(1) }} s</span>
+<p class="summary">{{ p.summary }}</p>
+<p class="final"><b>Recomendación:</b> {{ p.final_text }}</p>
+<p class="muted">{{ p.disclaimer }}</p></div>
 
-<h2>Documentos recibidos</h2>
-<div class="card" style="overflow:auto"><table><tr><th>Archivo</th><th>Tipo detectado por contenido</th><th>Estado técnico</th><th>Páginas</th></tr>
-{% for f in meta.files %}{% set d = (r.documents|selectattr('file_id','equalto',f.file_id)|list|first) %}
-<tr><td>{{ f.name }}{% if f.source.startswith('zip:') %}<div class="muted">en {{ f.source[4:] }}</div>{% endif %}</td>
-<td>{% if d %}{{ DOC_LABELS[d.doc_type] }} <span class="muted">({{ (d.classification_confidence*100)|int }} %)</span>{% else %}—{% endif %}</td>
-<td><span class="badge {{ {'analizado':'b-ok','ilegible':'b-err','duplicado':'b-warn','formato_invalido':'b-err'}.get(f.status,'b-pend') }}">{{ FILE_STATUS_LABEL.get(f.status, f.status) }}</span>{% if f.rejection %}<div class="muted">{{ f.rejection.message }}</div>{% endif %}</td>
-<td>{% if d %}{% for p in d.pages %}<div class="muted">p.{{ p.page }}: {{ {'ok':'legible','baja_calidad':'baja calidad','ilegible':'ilegible','en_blanco':'en blanco','omitida':'no analizada'}[p.status] }}{% if p.issues and p.status!='ok' %} — {{ p.issues[0] }}{% endif %}</div>{% endfor %}{% endif %}</td></tr>{% endfor %}</table></div>
+<div class="secbar" style="margin-bottom:6px">{% for s in security %}<div class="sec"><b><span class="dot {{ 'ok' if s.ok }}"></span>{{ s.name }}</b>{{ s.detail }}</div>{% endfor %}</div>
 
-<h2>Requisitos evaluados</h2>
-<div class="card" style="overflow:auto"><table><tr><th>Requisito</th><th>Resultado</th><th>Justificación y evidencia</th><th>Regla</th></tr>
-{% for q in r.requirements %}<tr><td>{{ q.description }}</td><td><span class="badge {{ {'cumplido':'b-ok','incumplido':'b-err','pendiente':'b-warn'}[q.status] }}">{{ REQ_LABEL[q.status] }}</span></td><td>{{ q.justification }}{{ ev(q.evidence) }}</td>
-<td class="muted">{{ q.rule }}{% if q.rule_level and q.rule_level.startswith('provisional') %}<br><span class="badge b-warn">provisional</span>{% endif %}</td></tr>{% endfor %}</table></div>
+<h2>Lo que necesita atención</h2>
+{% for f in p.findings %}
+<div class="card finding sev-{{ f.severity }}">
+  <div class="ftitle"><span class="badge {{ {'high':'b-err','medium':'b-warn','low':'b-pend'}[f.severity] }}">{{ f.severity_label }}</span> <b>{{ f.title }}</b></div>
+  <p>{{ f.text }}</p>
+  <p class="muted"><b>Por qué importa:</b> {{ f.why }}</p>
+  <div class="rec"><b>Qué hacer:</b> {{ f.recommendation }}</div>
+  {% if f.docs %}<div class="docs-line">Documentos relacionados: {% for d in f.docs %}{{ d.label }}{% if d.page %}, página {{ d.page }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  {% if f.evidence %}<details><summary>Ver dónde aparece en los documentos</summary>
+    {% for e in f.evidence %}<div class="docs-line" style="margin-top:6px"><b>{{ e.doc }}{% if e.page %}, página {{ e.page }}{% endif %}</b> · {% if e.verified %}texto comprobado en el original{% elif e.verified == false %}no se pudo comprobar en el original{% else %}sin comprobar{% endif %}</div><div class="frag">{{ e.fragment }}</div>{% endfor %}</details>{% endif %}
+</div>
+{% else %}<div class="alert ok">No se encontraron puntos que necesiten atención en las revisiones realizadas.</div>{% endfor %}
 
-<h2>Comparación entre documentos</h2>
-<div class="card" style="overflow:auto"><table><tr><th>Dato</th><th>Valores por documento</th><th>Resultado</th></tr>
+{% if p.missing %}<h2>Documentos faltantes</h2>
+{% for m in p.missing %}<div class="card finding sev-medium"><b>{{ m.label }}</b><p>{{ m.text }}</p><div class="rec"><b>Qué hacer:</b> {{ m.recommendation }}</div></div>{% endfor %}{% endif %}
+
+<h2>Estado de los documentos</h2>
+{% if p.problem_docs %}<h3 style="font-size:15px;margin:8px 0">Con problemas o pendientes</h3>
+<div class="docgrid">{% for c in p.problem_docs %}<div class="doccard s-{{ c.status }}"><h3>{{ c.label }}</h3>{{ status_badge(c.status, c.status_label) }}<div class="muted" style="margin-top:6px">{{ c.status_help }}</div>
+{% if c.reasons %}<ul>{% for x in c.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}{% if c.files %}<div class="muted" style="margin-top:6px">Archivo: {{ c.files|join(', ') }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
+{% if p.ok_docs %}<h3 style="font-size:15px;margin:14px 0 8px">Correctos</h3>
+<div class="docgrid">{% for c in p.ok_docs %}<div class="doccard s-correcto"><h3>{{ c.label }}</h3>{{ status_badge(c.status, c.status_label) }}<div class="muted" style="margin-top:6px">{{ c.status_help }}</div>{% if c.files %}<div class="muted" style="margin-top:6px">Archivo: {{ c.files|join(', ') }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
+<p class="muted">«Recibido» significa que el archivo se pudo abrir; no significa que el documento cumpla. El estado de arriba refleja la revisión del contenido.</p>
+
+<h2>Detalle completo de la revisión</h2>
+<details class="card"><summary>Ver requisitos revisados</summary>
+<table><tr><th>Requisito</th><th>Resultado</th><th>Explicación</th></tr>
+{% for q in r.requirements %}<tr><td>{{ q.description }}</td><td><span class="badge {{ {'cumplido':'b-ok','incumplido':'b-err','pendiente':'b-warn'}[q.status] }}">{{ REQ_LABEL[q.status] }}</span></td><td>{{ q.justification }}{{ ev(q.evidence) }}{% if q.rule_level and q.rule_level.startswith('provisional') %}<div class="muted"><span class="badge b-warn">regla provisional</span></div>{% endif %}</td></tr>{% endfor %}</table></details>
+
+<details class="card"><summary>Ver comparación de datos entre documentos</summary>
+<table><tr><th>Dato</th><th>Lo que dice cada documento</th><th>Resultado</th></tr>
 {% for c in r.comparisons %}<tr><td>{{ c.label }}</td><td>{% for v in c['values'] %}<div><b>{{ v.doc }}:</b> {{ v.value }}{{ ev(v.evidence) }}</div>{% else %}<span class="muted">sin datos</span>{% endfor %}</td>
-<td><span class="badge {{ {'igual':'b-ok','distinto':'b-err','indeterminado':'b-warn','sin_comparacion':'b-pend'}[c.result] }}">{{ {'igual':'Coincide','distinto':'Información inconsistente','indeterminado':'Pendiente de revisión','sin_comparacion':'Sin comparar'}[c.result] }}</span><div class="muted">{{ c.note }}</div></td></tr>{% endfor %}</table></div>
+<td><span class="badge {{ {'igual':'b-ok','distinto':'b-err','indeterminado':'b-warn','sin_comparacion':'b-pend'}[c.result] }}">{{ {'igual':'Coincide','distinto':'No coincide','indeterminado':'Necesita revisión','sin_comparacion':'No se pudo comparar'}[c.result] }}</span></td></tr>{% endfor %}</table></details>
 
-<h2>Hallazgos</h2>
-{% for f in r.findings %}<div class="card"><span class="badge {{ {'high':'b-err','medium':'b-warn','low':'b-pend'}[f.severity] }}">{{ {'high':'Alta','medium':'Media','low':'Baja'}[f.severity] }}</span> <b>{{ f.finding_id }}</b> · {{ f.description }}
-<div class="muted">Tipo: {{ f.finding_type }} · Agente: {{ f.agent }} · Confianza {{ (f.confidence*100)|int }} % · Auditoría: {{ f.audit_status }}{% if f.rule %} · Regla: {{ f.rule }}{% endif %}{% if f.filename %} · Documento: {{ f.filename }}{% if f.page %}, pág. {{ f.page }}{% endif %}{% endif %}</div>
-{% if f.found_value %}<div class="muted">Valor encontrado: {{ f.found_value }}{% if f.compared_value %} · Comparado con: {{ f.compared_value }}{% endif %}</div>{% endif %}{{ ev(f.evidence) }}</div>
-{% else %}<p class="muted">No se registraron hallazgos.</p>{% endfor %}
+<details class="card"><summary>Ver información leída de cada documento</summary>
+{% for x in r.extractions %}<h4 style="margin:10px 0 4px">{{ DOC_LABELS[x.doc_type] }} · {{ x.filename }}</h4><table>{% for k, f in x.fields.items() if f.status in ('present','ambiguous') %}<tr><td><code>{{ k }}</code></td><td>{{ f.value }}<span class="muted"> · confianza {{ (f.confidence*100)|int }} %</span>{{ ev(f.evidence) }}</td></tr>{% endfor %}</table>{% endfor %}</details>
 
-<h2>Información extraída</h2>
-{% for x in r.extractions %}<details class="card"><summary>{{ DOC_LABELS[x.doc_type] }} · {{ x.filename }} ({{ x.status }})</summary><table>{% for k, f in x.fields.items() if f.status in ('present','ambiguous') %}<tr><td><code>{{ k }}</code></td><td>{{ f.value }}<span class="muted"> · confianza {{ (f.confidence*100)|int }} %</span>{{ ev(f.evidence) }}</td></tr>{% endfor %}</table></details>{% endfor %}
-
-<h2>Agentes participantes y tiempos</h2>
-<details class="card"><summary>Ver registro de ejecución ({{ r.agent_log|length }} ejecuciones · evidencias verificadas {{ r.audit.stats.verificadas }}/{{ r.audit.stats.evidencias }})</summary>
-<table><tr><th>Agente</th><th>Estado</th><th>Duración</th><th>Modelo</th><th>Salida</th></tr>{% for e in r.agent_log %}<tr><td>{{ e.agent_id }} · {{ e.agent_name }}</td><td>{{ e.status }}</td><td>{{ e.duration_ms }} ms</td><td>{{ 'LLM local' if e.used_llm else 'reglas deterministas' }}</td><td class="muted">{{ e.output_summary }}</td></tr>{% endfor %}</table>
-<p class="muted">Reglas usadas: versión {{ r.rules_reference.version }} · huella {{ r.rules_reference.sha256[:16] }}… · Etapas (ms): {{ r.timings_ms }}</p></details>
+<details class="card"><summary>Ver detalle técnico del análisis ({{ r.agent_log|length }} pasos · datos comprobados {{ r.audit.stats.verificadas }} de {{ r.audit.stats.evidencias }})</summary>
+<table><tr><th>Agente</th><th>Estado</th><th>Duración</th><th>Cómo trabajó</th><th>Resultado</th></tr>{% for e in r.agent_log %}<tr><td>{{ e.agent_id }} · {{ e.agent_name }}</td><td>{{ e.status }}</td><td>{{ e.duration_ms }} ms</td><td>{{ 'modelo local' if e.used_llm else 'reglas fijas' }}</td><td class="muted">{{ e.output_summary }}</td></tr>{% endfor %}</table>
+<p class="muted">Reglas usadas: versión {{ r.rules_reference.version }} · huella {{ r.rules_reference.sha256[:16] }}… · Tiempos por etapa (ms): {{ r.timings_ms }}</p>
+<p class="muted"><b>Explicación original del Agente 10:</b> {{ r.recommendation.explanation }}</p></details>
 {% endif %}
 
 <h2>Purgar / Destruir expediente</h2>

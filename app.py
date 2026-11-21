@@ -18,7 +18,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 import settings  # noqa: F401  (carga .env)
 from schemas.schemas import DOC_TYPE_LABELS, PROJECT_LABELS, DocType, ProjectType
 from services import mfa_service as auth
-from services import rules_service
+from services import presenter, rules_service
 from services.encryption_service import MissingMasterKey
 from services.form_service import get_store
 from services.purge_service import purge_expediente, receipts
@@ -223,7 +223,8 @@ def detail(request: Request, exp_id: str, user: str = Depends(lawyer), purgado: 
     if result:
         for rq in result["requirements"]:
             pass
-    return templates.TemplateResponse(request, "detail.html", {"user": user, "meta": meta, "r": result, "security": _security(exp_id, True),
+    plain = presenter.build(result, meta) if result else None   # capa de presentacion: no re-evalua, solo explica
+    return templates.TemplateResponse(request, "detail.html", {"user": user, "meta": meta, "r": result, "p": plain, "security": _security(exp_id, True),
                                                                "progress": store.progress(exp_id), "error": request.query_params.get("error")})
 
 

@@ -16,9 +16,11 @@ class EvaluadorAgent(BaseAgent):
     name = "Evaluador y recomendación"
     responsibility = "Emitir exclusivamente Cumple, Requiere revisión o No cumple, con explicación, evidencias y nivel de confianza."
     system_prompt = (
-        "Eres un asistente legal que redacta, para un abogado de Tiendas 3B, la explicacion de una recomendacion inicial sobre un expediente "
-        "inmobiliario. Usa EXCLUSIVAMENTE los datos del resumen; no agregues hechos, no cambies el veredicto y no digas que sustituyes la "
-        "decision del abogado. Un dato desconocido es 'pendiente de revision', no un incumplimiento. Redacta en espanol claro, 3 a 6 oraciones."
+        "Eres un asistente que explica, a una persona de Tiendas 3B, la situacion de los documentos de un inmueble. Usa EXCLUSIVAMENTE los datos "
+        "del resumen; no agregues hechos, no inventes tramites ni obligaciones legales y no cambies el veredicto. Un dato desconocido es "
+        "'pendiente de revision', no un incumplimiento. Escribe en espanol natural, profesional y directo: oraciones cortas, 3 a 5 oraciones, "
+        "sin palabras tecnicas (no uses 'discrepancia', 'inconsistencia', 'validacion', 'extraccion', 'evidencia documental', 'parametro'). "
+        "Di que ocurrio, en que documento y que conviene revisar o pedir. Si algo no se pudo leer, dilo asi: 'no se pudo leer', no que este mal."
     )
     human = "VEREDICTO: {verdict}\nDESTINO: {dest}\nRESUMEN ESTRUCTURADO:\n{summary}"
 
@@ -35,26 +37,26 @@ class EvaluadorAgent(BaseAgent):
         unverified = [f for f in findings if f.audit_status in (AuditStatus.NO_VERIFICADO, AuditStatus.REQUIERE_REVISION)]
 
         if confirmed:
-            verdict, reason = Verdict.NO_CUMPLE, "Existe al menos un incumplimiento confirmado con evidencia verificada: " + "; ".join(f.description for f in confirmed)[:300]
+            verdict, reason = Verdict.NO_CUMPLE, "Se encontró al menos un requisito que no se cumple, comprobado en el documento original: " + "; ".join(f.description for f in confirmed)[:300]
         elif crit_findings or incumplidos or pendientes or incons or missing_docs or unreadable or unverified or audit.get("needs_review"):
             parts = []
             if crit_findings:
-                parts.append("hay un posible incumplimiento cuya evidencia no pudo verificarse")
+                parts.append("hay un posible problema que no se pudo comprobar en el documento original")
             if missing_docs:
                 parts.append("faltan documentos: " + ", ".join(missing_docs))
             if unreadable:
-                parts.append("hay documentos o páginas ilegibles que deben reemplazarse")
+                parts.append("hay imágenes que no se pueden leer y conviene reemplazar")
             if incons:
-                parts.append(f"hay {len(incons)} inconsistencia(s) entre documentos")
+                parts.append(f"hay {len(incons)} diferencia(s) de información entre documentos")
             if pendientes:
-                parts.append(f"hay {len(pendientes)} requisito(s) pendiente(s) de verificación")
+                parts.append(f"hay {len(pendientes)} punto(s) que todavía no se pudieron comprobar")
             if incumplidos and not crit_findings:
-                parts.append("hay requisitos incumplidos que requieren criterio del abogado")
+                parts.append("hay requisitos que no se cumplen y necesitan el criterio del abogado")
             if audit.get("needs_review") and not crit_findings:
-                parts.append("algunas citas no se pudieron verificar en el documento original")
+                parts.append("algunos datos no se pudieron comprobar en el documento original")
             verdict, reason = Verdict.REQUIERE_REVISION, "Requiere revisión porque " + "; ".join(parts) + "."
         else:
-            verdict, reason = Verdict.CUMPLE, "Todos los requisitos evaluados se cumplen, sin inconsistencias y con evidencia verificada."
+            verdict, reason = Verdict.CUMPLE, "Todos los requisitos revisados se cumplen, no hay diferencias entre documentos y los datos se comprobaron en los originales."
 
         confs = [f["confidence"] for e in extractions for f in e["fields"].values() if f.get("status") == "present"]
         base = (sum(confs) / len(confs)) if confs else 0.3

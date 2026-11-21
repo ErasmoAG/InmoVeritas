@@ -51,6 +51,13 @@ Formulario público /r/{token}  ──►  Recepción técnica (sin LLM)
 Cada agente tiene identificador, prompt propio, salida estructurada (Pydantic), reintentos, manejo de errores y registro de ejecución con tiempos
 (visible en el detalle del expediente). A7 y A10 (veredicto) son deterministas a propósito: así las reglas no dependen del criterio del modelo.
 
+## Resultados en lenguaje sencillo
+`services/presenter.py` es una capa independiente que **solo traduce** el resultado de los agentes a explicaciones claras: situación general, lo que necesita
+atención (qué pasó, en qué documento y página, por qué importa y qué hacer), estado de cada documento (Correcto, Requiere revisión, No cumple, Faltante, Ilegible,
+Pendiente) y documentos faltantes. No vuelve a evaluar, no cambia datos, confianza ni veredicto, y no omite hallazgos (un tipo desconocido se muestra con texto
+genérico). El resultado guardado conserva los datos técnicos; la capa se aplica al mostrar, así que también mejora expedientes ya analizados. Las evidencias
+quedan en secciones expandibles. El Agente 10 redacta con un prompt de lenguaje natural; el texto que ve el usuario sale de la capa de presentación.
+
 ## Reglas (`config/rules_config.yaml`)
 Se pueden reemplazar desde el panel («Reglas»): se valida la estructura, se guarda copia y historial, y cada análisis conserva la versión y huella usadas.
 **Lo que NO está definido oficialmente queda vacío** (categorías de uso de suelo, tolerancia de superficie, duración de vigencias) y el sistema lo marca como
