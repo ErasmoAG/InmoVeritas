@@ -5,6 +5,7 @@
         WAIT='<svg class="i st" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
         X='<svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   const state={}; // slot -> [{id,name,ok,msg,pending}]
+  (window.EXISTING||[]).forEach(f=>{(state[f.slot]=state[f.slot]||[]).push({id:f.file_id,name:f.name,ok:f.ok,msg:f.msg});});
   const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const friendly=r=>{ if(!r) return 'No se pudo recibir este archivo. Intenta de nuevo.';
     return (r.message||'No se pudo recibir este archivo.')+(r.hint?' '+r.hint:''); };
@@ -13,11 +14,12 @@
     box.innerHTML=items.map((f,i)=>`<div class="file ${f.pending?'':(f.ok?'ok':'bad')}">${f.pending?WAIT:(f.ok?OK:BAD)}<div class="nm">${esc(f.name)}${f.msg?`<span class="why">${esc(f.msg)}</span>`:''}</div>
       ${f.pending?'':`<button type="button" class="x" data-slot="${slot}" data-i="${i}" aria-label="Quitar">${X}</button>`}</div>`).join('');
     document.querySelector(`[data-slot="${slot}"].slot`).classList.toggle('ok',items.some(f=>f.ok));
-    const any=Object.values(state).some(a=>a.some(f=>f.ok)), busy=Object.values(state).some(a=>a.some(f=>f.pending));
-    send.disabled=!any||busy;
-    const missing=[...document.querySelectorAll('.slot')].filter(s=>!(state[s.dataset.slot]||[]).some(f=>f.ok)).map(s=>s.querySelector('h3').textContent);
-    hint.textContent=busy?'Subiendo…':(!any?'Agrega al menos un documento para poder enviar.':(missing.length?'Aún no agregaste: '+missing.join(', ')+'. Puedes enviar ahora o completar después.':'Todo listo para enviar.'));
+    const busy=Object.values(state).some(a=>a.some(f=>f.pending));
+    const missing=[...document.querySelectorAll('.slot')].filter(s=>!(state[s.dataset.slot]||[]).some(f=>f.ok)).map(s=>s.querySelector('h3').firstChild.textContent.trim());
+    send.disabled=busy||missing.length>0;
+    hint.textContent=busy?'Subiendo…':(missing.length?'Falta: '+missing.join(', ')+'.':'Todo listo para enviar.');
   }
+  Object.keys(state).forEach(render);
   document.querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>document.getElementById('in-'+b.dataset.pick).click()));
   document.querySelectorAll('input[type=file]').forEach(inp=>inp.addEventListener('change',()=>{
     const slot=inp.id.slice(3); if(!inp.files.length) return;
@@ -37,6 +39,6 @@
   send.addEventListener('click',async()=>{
     send.disabled=true; send.textContent='Enviando…';
     const r=await fetch(`/r/${T}/enviar`,{method:'POST'}); const j=await r.json().catch(()=>({}));
-    if(r.ok) location.href=`/r/${T}/gracias`; else { hint.textContent=j.error||'No se pudo enviar. Intenta de nuevo.'; send.disabled=false; send.textContent='Enviar documentos'; }
+    if(r.ok) location.href=`/r/${T}/gracias`; else { hint.textContent=j.error||'No se pudo enviar. Intenta de nuevo.'; send.disabled=false; send.textContent=window.RESEND?'Enviar de nuevo':'Enviar documentos'; }
   });
 })();

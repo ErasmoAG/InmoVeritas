@@ -1,13 +1,14 @@
 {% extends "base_public.html" %}{% from "_icons.html" import icon %}
 {% block content %}
 <div class="wrap"><div class="done">
-  <div class="ic">{{ icon('check') }}</div>
-  {% if just_sent %}
-  <h1>¡Listo, recibimos tus documentos!</h1>
-  <p class="lead">El equipo de Tiendas 3B los revisará y se pondrá en contacto contigo si necesita algo más. Ya puedes cerrar esta página.</p>
+  {% if mode == 'reviewing' %}
+  <div class="ic" style="background:var(--azul)">{{ icon('clock') }}</div>
+  <h1>Estamos revisando tus documentos</h1>
+  <p class="lead">Ya los recibimos y los estamos revisando. Si necesitas cambiar alguno, vuelve a abrir este enlace en unos minutos.</p>
   {% else %}
-  <h1>Estos documentos ya fueron enviados</h1>
-  <p class="lead">Este enlace ya se utilizó. Si necesitas enviar algo más, pide un enlace nuevo a la persona de Tiendas 3B que te lo compartió.</p>
+  <div class="ic">{{ icon('check') }}</div>
+  <h1>¡Listo, recibimos tus documentos!</h1>
+  <p class="lead">El equipo de Tiendas 3B los revisará y se pondrá en contacto contigo si necesita algo más. Si necesitas cambiar algún documento, puedes volver a abrir este enlace y enviarlos de nuevo.</p>
   {% endif %}
 </div></div>
 {% endblock %}

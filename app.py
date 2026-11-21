@@ -116,9 +116,9 @@ def intake_form(request: Request, token: str):
     exp_id, meta = _intake_ctx(token)
     if not exp_id:
         return templates.TemplateResponse(request, "intake_invalid.html", {}, status_code=404)
-    if meta["status"] != "esperando":
-        return templates.TemplateResponse(request, "intake_done.html", {"just_sent": False})
-    return templates.TemplateResponse(request, "intake.html", {"token": token})
+    if meta["status"] in ("recibido", "en_analisis"):
+        return templates.TemplateResponse(request, "intake_done.html", {"mode": "reviewing"})
+    return templates.TemplateResponse(request, "intake.html", {"token": token, "existing": get_store().existing_files(exp_id), "resend": meta["status"] != "esperando"})
 
 
 @app.post("/r/{token}/archivos")
@@ -156,7 +156,7 @@ def intake_submit(request: Request, token: str):
 
 @app.get("/r/{token}/gracias", response_class=HTMLResponse)
 def intake_thanks(request: Request, token: str):
-    return templates.TemplateResponse(request, "intake_done.html", {"just_sent": True})
+    return templates.TemplateResponse(request, "intake_done.html", {"mode": "sent"})
 
 
 # ======================================================================= ACCESO

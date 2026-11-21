@@ -3,12 +3,13 @@
 <div class="wrap">
   <h1>Envía los documentos de tu inmueble</h1>
   <p class="lead">Sube cada documento en su lugar. Puedes usar un PDF o una foto tomada con tu celular.</p>
+  {% if resend %}<div class="callout azul" style="margin-bottom:20px">{{ icon('info') }}<div>Ya recibimos tus documentos. Si necesitas cambiar alguno, quítalo con la ✕, sube el nuevo y vuelve a enviar.</div></div>{% endif %}
 
   {% for key, title, desc in SLOTS %}
   <section class="slot" data-slot="{{ key }}">
     <div class="num">{{ loop.index }}</div>
     <div class="body">
-      <h3>{{ title }}</h3>
+      <h3>{{ title }} <span class="small" style="font-weight:400">(obligatorio)</span></h3>
       <div class="desc">{{ desc }}</div>
       <input type="file" id="in-{{ key }}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.tif,.tiff,.heic,.heif,image/*,application/pdf" hidden>
       <button type="button" class="pick" data-pick="{{ key }}">{{ icon('upload') }} <span>Elegir archivo o tomar foto</span></button>
@@ -18,9 +19,9 @@
   {% endfor %}
 
   <div class="sendbar">
-    <button class="btn big" id="send" disabled>Enviar documentos</button>
-    <div class="small" id="hint" style="margin-top:8px">Agrega al menos un documento para poder enviar.</div>
+    <button class="btn big" id="send" disabled>{{ 'Enviar de nuevo' if resend else 'Enviar documentos' }}</button>
+    <div class="small" id="hint" style="margin-top:8px">Sube los 4 documentos para poder enviar.</div>
   </div>
 </div>
-<script>window.TOKEN="{{ token }}";</script><script src="/static/intake.js"></script>
+<script>window.TOKEN="{{ token }}";window.EXISTING={{ existing|tojson }};window.RESEND={{ "true" if resend else "false" }};</script><script src="/static/intake.js"></script>
 {% endblock %}

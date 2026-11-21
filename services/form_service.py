@@ -4,6 +4,7 @@ Todo lo que se guarda va cifrado por expediente (AES-256-GCM): archivos original
 El envio del formulario publica un evento que activa AUTOMATICAMENTE al Agente 1 (sin accion manual del abogado)."""
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 import uuid
@@ -21,6 +22,8 @@ from settings import get_settings
 import os
 
 LINK_MAX_AGE = 7 * 24 * 3600
+KEPT = (FileStatus.FORMATO_VALIDO.value, FileStatus.ANALIZADO.value, FileStatus.ILEGIBLE.value)   # archivos aceptados en el expediente
+REQUIRED_SLOTS = [("escrituras", "Escrituras"), ("predial", "Predial"), ("alineamiento_numero_oficial", "Alineamiento y Número Oficial"), ("uso_suelo", "Uso de Suelo")]
 _progress: dict[str, list[dict]] = {}
 _handlers: dict[str, list[Callable]] = {"expediente_recibido": []}
 _lock = threading.Lock()
@@ -106,9 +109,9 @@ class ExpedienteStore:
     # carga validada
     def stage_files(self, exp_id: str, items: list[tuple[str, bytes]], declared: Optional[str] = None, allow_zip: bool = False) -> list[dict]:
         meta = self.get_meta(exp_id)
-        if meta["status"] not in ("esperando",):
-            raise ValueError("Este expediente ya fue enviado; no admite más archivos.")
-        existing = {f["sha256"]: f["file_id"] for f in meta["files"] if f["status"] == FileStatus.FORMATO_VALIDO.value}
+        if meta["status"] in ("recibido", "en_analisis"):
+            raise ValueError("Estamos revisando tus documentos. Podrás enviar de nuevo en un momento.")
+        existing = {f["sha256"]: f["file_id"] for f in meta["files"] if f["status"] in KEPT}
         accepted_count = len(existing)
         out = []
         zips = [(n, d) for n, d in items if n.lower().endswith(".zip")] if not allow_zip else []
@@ -140,7 +143,7 @@ class ExpedienteStore:
 
     def remove_file(self, exp_id: str, file_id: str) -> bool:
         meta = self.get_meta(exp_id)
-        if meta["status"] != "esperando":
+        if meta["status"] in ("recibido", "en_analisis"):
             return False
         meta["files"] = [f for f in meta["files"] if f["file_id"] != file_id]
         p = self.enc.data_dir(exp_id) / "original" / f"{file_id}.enc"
@@ -149,13 +152,34 @@ class ExpedienteStore:
         self.put_meta(exp_id, meta)
         return True
 
+    def existing_files(self, exp_id: str) -> list[dict]:
+        """Archivos ya recibidos, para mostrarlos de nuevo si la persona vuelve a abrir el enlace."""
+        out = []
+        for f in self.get_meta(exp_id)["files"]:
+            if f["status"] in KEPT and f.get("declared"):
+                bad = f["status"] == FileStatus.ILEGIBLE.value
+                out.append({"file_id": f["file_id"], "slot": f["declared"], "name": f["name"], "ok": not bad,
+                            "msg": "No se pudo leer bien. Prueba con una foto o un escaneo más claro." if bad else ""})
+        return out
+
     def submit(self, exp_id: str) -> dict:
+        """Primer envio o reenvio: exige los 4 documentos y (re)inicia el analisis automaticamente."""
         meta = self.get_meta(exp_id)
-        if meta["status"] != "esperando":
-            raise ValueError("Estos documentos ya fueron enviados.")
-        if not any(f["status"] == FileStatus.FORMATO_VALIDO.value for f in meta["files"]):
-            raise ValueError("Agregue al menos un documento antes de enviar.")
-        meta.update(status="recibido", submitted_at=_now())
+        if meta["status"] in ("recibido", "en_analisis"):
+            raise ValueError("Estamos revisando tus documentos. Podrás enviar de nuevo en un momento.")
+        have = {f.get("declared") for f in meta["files"] if f["status"] in KEPT}
+        missing = [label for key, label in REQUIRED_SLOTS if key not in have]
+        if missing:
+            raise ValueError("Faltan estos documentos: " + ", ".join(missing) + ".")
+        resend = meta["status"] in ("analizado", "error")
+        for f in meta["files"]:
+            if f["status"] in (FileStatus.ANALIZADO.value, FileStatus.ILEGIBLE.value):
+                f["status"] = FileStatus.FORMATO_VALIDO.value        # se vuelven a analizar
+        if resend:
+            shutil.rmtree(self.enc.data_dir(exp_id) / "procesado", ignore_errors=True)   # copias procesadas del analisis anterior
+            meta["resubmissions"] = meta.get("resubmissions", 0) + 1
+            meta.update(verdict=None, confidence=None, error=None)
+        meta.update(status="recibido", submitted_at=_now(), opened_at=None)
         self.put_meta(exp_id, meta)
         publish("expediente_recibido", exp_id=exp_id)   # activa al Agente 1 automaticamente
         return meta
