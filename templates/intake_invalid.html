@@ -1,4 +1,8 @@
-{% extends "base.html" %}{% block content %}
-<h1>Enlace no válido o vencido</h1>
-<div class="alert warn">Qué ocurrió: este enlace de recepción no existe, venció (vigencia de 7 días) o el expediente fue eliminado. Qué puede hacer: solicite un enlace nuevo a la persona de Tiendas 3B que se lo compartió.</div>
+{% extends "base_public.html" %}{% from "_icons.html" import icon %}
+{% block content %}
+<div class="wrap"><div class="done">
+  <div class="ic" style="background:var(--ink3)">{{ icon('clock') }}</div>
+  <h1>Este enlace ya no está disponible</h1>
+  <p class="lead">Puede haber vencido o ya no estar activo. Pide un enlace nuevo a la persona de Tiendas 3B que te lo compartió.</p>
+</div></div>
 {% endblock %}

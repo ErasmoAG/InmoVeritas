@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Expedientes{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Expedientes</h1><p>Todas las solicitudes de Tiendas 3B.</p></div><a class="btn" href="/panel/nuevo">{{ icon('plus') }} Nueva solicitud</a></div>
+<form class="toolbar" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Buscar por nombre">
+  <select name="f" onchange="this.form.submit()">{% for k, v in [('', 'Todos'), ('nuevas', 'Nuevas por abrir'), ('analizando', 'Analizándose'), ('esperando', 'Esperando documentos'), ('cumple', 'Cumplen'), ('revisar', 'Requieren revisión'), ('no_cumple', 'No cumplen')] %}<option value="{{ k }}" {{ 'selected' if f == k }}>{{ v }}</option>{% endfor %}</select>
+  <button class="btn sec">Buscar</button>
+</form>
+<div class="card" style="padding:6px 10px">
+{% if rows %}<table><thead><tr><th>Nombre</th><th>Proyecto</th><th>Fecha</th><th>Documentos</th><th>Estado</th><th>Resultado</th><th></th></tr></thead><tbody>
+{% for r in rows %}<tr>
+  <td><b>{{ r.applicant }}</b> {% if r.is_new %}<span class="nuevo">Nuevo</span>{% endif %}<div class="small">{{ r.exp_id }}</div></td>
+  <td>{{ r.project_label }}</td><td>{{ (r.submitted_at or r.created_at)[:10] }}</td><td>{{ r.docs_ok }} de 4</td>
+  <td><span class="pill {{ r.state_color }}">{{ r.state }}</span></td>
+  <td>{% if r.verdict_label %}<span class="pill {{ r.verdict_color }}">{{ r.verdict_label }}</span>{% else %}<span class="small">—</span>{% endif %}</td>
+  <td style="text-align:right"><a class="btn sec sm" href="/panel/expedientes/{{ r.exp_id }}">{{ 'Ver enlace' if r.status == 'esperando' else 'Abrir' }}</a></td></tr>{% endfor %}</tbody></table>
+{% else %}<div class="empty">{{ icon('folder') }}<b>{{ 'No hay resultados con ese filtro' if total else 'Aún no hay expedientes' }}</b>{{ 'Prueba con otra búsqueda.' if total else 'Crea una solicitud para empezar.' }}</div>{% endif %}
+</div>
+{% endblock %}

@@ -74,12 +74,27 @@ class ExpedienteStore:
         return sorted(out, key=lambda m: m.get("created_at", ""), reverse=True)
 
     # enlace
-    def create_link(self, reference: str = "") -> tuple[str, str]:
+    def create_link(self, applicant: str, project_type: str, reference: str = "") -> tuple[str, str]:
+        """El trabajador de Tiendas 3B registra el nombre y el tipo de proyecto; quien recibe el enlace solo sube documentos."""
+        applicant = (applicant or "").strip()
+        if not applicant:
+            raise ValueError("Escriba el nombre de la persona o empresa.")
+        if project_type not in ("store", "cedis"):
+            raise ValueError("Elija el tipo de proyecto: tienda o centro de distribución.")
         exp_id = "EXP-" + uuid.uuid4().hex[:8].upper()
         self.enc.create_expediente_key(exp_id)
-        self.put_meta(exp_id, {"exp_id": exp_id, "reference": reference.strip()[:80], "applicant": "", "project_type": None, "created_at": _now(),
-                               "status": "esperando", "files": [], "progress": [], "verdict": None, "confidence": None})
-        return exp_id, _serializer().dumps({"e": exp_id})
+        self.put_meta(exp_id, {"exp_id": exp_id, "reference": reference.strip()[:80], "applicant": applicant[:120], "project_type": project_type, "created_at": _now(),
+                               "status": "esperando", "files": [], "progress": [], "verdict": None, "confidence": None, "opened_at": None})
+        return exp_id, self.make_token(exp_id)
+
+    def make_token(self, exp_id: str) -> str:
+        return _serializer().dumps({"e": exp_id})
+
+    def mark_opened(self, exp_id: str) -> None:
+        meta = self.get_meta(exp_id)
+        if not meta.get("opened_at") and meta.get("status") in ("recibido", "en_analisis", "analizado", "error"):
+            meta["opened_at"] = _now()
+            self.put_meta(exp_id, meta)
 
     def resolve_token(self, token: str) -> Optional[str]:
         try:
@@ -89,17 +104,25 @@ class ExpedienteStore:
         return exp_id if self.enc.has_key(exp_id) else None
 
     # carga validada
-    def stage_files(self, exp_id: str, items: list[tuple[str, bytes]]) -> list[dict]:
+    def stage_files(self, exp_id: str, items: list[tuple[str, bytes]], declared: Optional[str] = None, allow_zip: bool = False) -> list[dict]:
         meta = self.get_meta(exp_id)
         if meta["status"] not in ("esperando",):
             raise ValueError("Este expediente ya fue enviado; no admite más archivos.")
         existing = {f["sha256"]: f["file_id"] for f in meta["files"] if f["status"] == FileStatus.FORMATO_VALIDO.value}
         accepted_count = len(existing)
-        results = validate_submission(items)
         out = []
+        zips = [(n, d) for n, d in items if n.lower().endswith(".zip")] if not allow_zip else []
+        items = [(n, d) for n, d in items if (n, d) not in zips]
+        for n, d in zips:  # el formulario solo recibe PDF o imagenes
+            rec = {"file_id": uuid.uuid4().hex[:12], "name": n[:150], "source": "upload", "format": None, "size": len(d), "sha256": "", "status": FileStatus.FORMATO_INVALIDO.value,
+                   "rejection": {"code": "no_zip", "message": "Este tipo de archivo no se puede enviar aquí.", "hint": "Súbalo como PDF o como foto."}, "warnings": [], "pages": 0,
+                   "duplicate_of": None, "declared": declared}
+            meta["files"].append(rec)
+            out.append(rec)
+        results = validate_submission(items) if items else []
         for r in results:
             rec = {"file_id": r.file_id, "name": r.original_name, "source": r.source, "format": r.detected_format, "size": r.size_bytes, "sha256": r.sha256,
-                   "status": r.status.value, "rejection": r.rejection.model_dump() if r.rejection else None, "warnings": r.warnings, "pages": r.pages, "duplicate_of": r.duplicate_of}
+                   "status": r.status.value, "rejection": r.rejection.model_dump() if r.rejection else None, "warnings": r.warnings, "pages": r.pages, "duplicate_of": r.duplicate_of, "declared": declared}
             if r.status == FileStatus.FORMATO_VALIDO:
                 if r.sha256 in existing:  # duplicado de un archivo ya cargado antes
                     rec.update(status=FileStatus.DUPLICADO.value, duplicate_of=existing[r.sha256],
@@ -126,15 +149,13 @@ class ExpedienteStore:
         self.put_meta(exp_id, meta)
         return True
 
-    def submit(self, exp_id: str, applicant: str, project_type: str) -> dict:
+    def submit(self, exp_id: str) -> dict:
         meta = self.get_meta(exp_id)
         if meta["status"] != "esperando":
-            raise ValueError("Este expediente ya fue enviado.")
-        if project_type not in ("store", "cedis"):
-            raise ValueError("Seleccione el tipo de proyecto: tienda comercial o CEDIS.")
+            raise ValueError("Estos documentos ya fueron enviados.")
         if not any(f["status"] == FileStatus.FORMATO_VALIDO.value for f in meta["files"]):
-            raise ValueError("Adjunte al menos un archivo válido antes de enviar.")
-        meta.update(applicant=applicant.strip()[:120], project_type=project_type, status="recibido", submitted_at=_now())
+            raise ValueError("Agregue al menos un documento antes de enviar.")
+        meta.update(status="recibido", submitted_at=_now())
         self.put_meta(exp_id, meta)
         publish("expediente_recibido", exp_id=exp_id)   # activa al Agente 1 automaticamente
         return meta

@@ -1,5 +1,5 @@
-"""Flujo web: MFA, enlace, carga validada, activacion automatica del analisis, purga y acceso protegido."""
-import io
+"""Flujo web: acceso con codigo, enlace creado por 3B, formulario de 4 documentos, activacion automatica, eliminacion y vistas."""
+import re
 import time
 
 import pymupdf
@@ -36,71 +36,142 @@ def env(tmp_path, monkeypatch):
 
 def login(client, secret):
     assert client.post("/panel/login", data={"username": "abogado", "password": "una-clave-larga-123"}).status_code == 200
-    r = client.post("/panel/mfa", data={"code": pyotp.TOTP(secret).now()})
-    assert r.status_code == 303
+    assert client.post("/panel/mfa", data={"code": pyotp.TOTP(secret).now()}).status_code == 303
     return client
+
+
+def new_link(client, fs, name="Juan Pérez", kind="store"):
+    r = client.post("/panel/nuevo", data={"applicant": name, "project_type": kind})
+    assert r.status_code == 303
+    exp_id = r.headers["location"].rsplit("/", 1)[1]
+    return exp_id, fs.get_store().make_token(exp_id)
 
 
 def test_panel_exige_autenticacion(env):
     client, *_ = env
     assert client.get("/panel").status_code == 303
+    assert client.get("/panel/expedientes").status_code == 303
     assert client.get("/panel/expedientes/EXP-X").status_code == 303
+    assert client.get("/panel/qr/EXP-X.png").status_code == 303
 
 
-def test_contrasena_sola_no_da_acceso_y_mfa_incorrecto_se_rechaza(env):
+def test_contrasena_sola_no_da_acceso_y_codigo_incorrecto_se_rechaza(env):
     client, secret, *_ = env
     client.post("/panel/login", data={"username": "abogado", "password": "una-clave-larga-123"})
-    assert client.get("/panel").status_code == 303          # falta el segundo factor
+    assert client.get("/panel").status_code == 303          # falta el codigo
     assert client.post("/panel/mfa", data={"code": "000000"}).status_code == 401
     assert client.get("/panel").status_code == 303
     assert client.post("/panel/login", data={"username": "abogado", "password": "mala"}).status_code == 401
 
 
-def test_flujo_completo_enlace_carga_envio_y_activacion_automatica(env):
+def test_el_enlace_exige_nombre_y_tipo(env):
     client, secret, calls, fs = env
     login(client, secret)
-    r = client.post("/panel/enlaces", data={"reference": "Terreno de prueba"})
-    token = r.headers["location"].split("nuevo=")[1]
-    public = TestClient(client.app, follow_redirects=False)    # contraparte: sin sesion
-    assert public.get(f"/r/{token}").status_code == 200
-    assert public.get("/r/token-falso").status_code == 404
-    same = tiny_pdf()
-    files = [("files", ("escritura.pdf", same, "application/pdf")),
-             ("files", ("falso.pdf", b"MZ" + b"\0" * 900, "application/pdf")),
-             ("files", ("copia.pdf", same, "application/pdf"))]
-    res = public.post(f"/r/{token}/archivos", files=files).json()["results"]
-    st = {x["name"]: x["status"] for x in res}
-    assert st == {"escritura.pdf": "formato_valido", "falso.pdf": "formato_invalido", "copia.pdf": "duplicado"}
-    assert next(x for x in res if x["name"] == "falso.pdf")["rejection"]["hint"]
-    # sin tipo de proyecto no se envia
-    assert public.post(f"/r/{token}/enviar", data={"applicant": "ACME", "project_type": ""}).status_code == 400
-    assert calls == []
-    assert public.post(f"/r/{token}/enviar", data={"applicant": "ACME", "project_type": "cedis"}).status_code == 200
-    time.sleep(0.3)
-    assert len(calls) == 1                                       # el Agente 1 se activo solo, sin accion del abogado
-    assert public.get(f"/r/{token}").text.count("ya fue utilizado") == 1
-    assert client.get("/panel").status_code == 200 and "ACME" in client.get("/panel").text
+    for data in ({"applicant": "", "project_type": "store"}, {"applicant": "ACME", "project_type": ""}):
+        r = client.post("/panel/nuevo", data=data)
+        assert r.status_code == 303 and "/panel/nuevo?error=" in r.headers["location"]
+    assert fs.get_store().list_ids() == []
 
 
-def test_archivos_cifrados_en_disco_y_purga_con_mfa(env):
+def test_formulario_publico_minimo_cuatro_documentos_sin_datos_ni_jerga(env):
     client, secret, calls, fs = env
     login(client, secret)
-    token = client.post("/panel/enlaces", data={}).headers["location"].split("nuevo=")[1]
+    exp_id, token = new_link(client, fs)
+    html = TestClient(client.app).get(f"/r/{token}").text
+    assert html.count('class="slot"') == 4
+    for t in ("Escrituras", "Predial", "Alineamiento y Número Oficial", "Uso de Suelo"):
+        assert t in html
+    assert 'name="applicant"' not in html and 'name="project_type"' not in html     # el nombre y el tipo los pone 3B
+    assert ".zip" not in html.lower() and "Juan" not in html
+    for word in ("agente", "OCR", "regla", "cifr", "MFA", "magic"):
+        assert word.lower() not in html.lower(), word
+
+
+def test_flujo_completo_carga_por_documento_envio_y_activacion_automatica(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs, "Inmobiliaria Norte", "cedis")
     pub = TestClient(client.app, follow_redirects=False)
-    secreto = b"PROPIETARIO JUAN PEREZ TEXTO SECRETO"
-    pub.post(f"/r/{token}/archivos", files=[("files", ("a.pdf", tiny_pdf(secreto.decode()), "application/pdf"))])
+    assert pub.get("/r/token-falso").status_code == 404
+    same = tiny_pdf()
+    up = lambda slot, name, data: pub.post(f"/r/{token}/archivos", data={"slot": slot}, files=[("files", (name, data, "application/pdf"))]).json()["results"][0]
+    assert up("escrituras", "escritura.pdf", same)["status"] == "formato_valido"
+    bad = up("predial", "falso.pdf", b"MZ" + b"\0" * 900)
+    assert bad["status"] == "formato_invalido" and bad["rejection"]["hint"]
+    assert up("uso_suelo", "copia.pdf", same)["status"] == "duplicado"
+    zipped = up("predial", "todo.zip", b"PK\x03\x04" + b"0" * 50)
+    assert zipped["status"] == "formato_invalido" and "PDF" in zipped["rejection"]["hint"]     # el formulario solo recibe PDF o fotos
+    meta = fs.get_store().get_meta(exp_id)
+    assert {f["name"]: f["declared"] for f in meta["files"]}["escritura.pdf"] == "escrituras"
+    assert calls == []
+    assert pub.post(f"/r/{token}/enviar").status_code == 200
+    time.sleep(0.3)
+    assert calls == [exp_id]                                      # el analisis arranco solo, sin accion del trabajador
+    assert pub.post(f"/r/{token}/enviar").status_code == 400      # no se puede enviar dos veces
+    assert "ya fueron enviados" in pub.get(f"/r/{token}").text
+    meta = fs.get_store().get_meta(exp_id)
+    assert meta["applicant"] == "Inmobiliaria Norte" and meta["project_type"] == "cedis"
+
+
+def test_envio_sin_documentos_validos_se_rechaza(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs)
+    r = TestClient(client.app).post(f"/r/{token}/enviar")
+    assert r.status_code == 400 and "al menos un documento" in r.json()["error"] and calls == []
+
+
+def test_nuevas_solicitudes_y_pantallas_del_panel_sin_jerga_ni_reglas(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs, "Familia López")
+    TestClient(client.app).post(f"/r/{token}/archivos", data={"slot": "predial"}, files=[("files", ("p.pdf", tiny_pdf(), "application/pdf"))])
+    TestClient(client.app).post(f"/r/{token}/enviar")
+    home = client.get("/panel").text
+    assert "Nuevas por abrir" in home and "Familia López" in home and 'class="nuevo"' in home
+    assert 'class="nuevo">1<' in client.get("/panel/expedientes").text                    # aviso en el menu
+    ready = client.get(f"/panel/enlaces/{exp_id}")
+    assert ready.status_code == 200 and "/panel/qr/" in ready.text and "wa.me" in ready.text
+    assert client.get(f"/panel/qr/{exp_id}.png").content[:4] == b"\x89PNG"
+    detail = client.get(f"/panel/expedientes/{exp_id}")                                      # al abrirlo deja de ser "nuevo"
+    assert detail.status_code == 200
+    assert 'class="nuevo"' not in client.get("/panel/expedientes").text
+    for page in (home, detail.text, client.get("/panel/expedientes").text):
+        low = page.lower()
+        for word in ("agente", "regla", "ocr", "aes", "totp", "llm", "ollama"):
+            assert word not in low, word
+    assert "/panel/reglas" not in home
+
+
+def test_estado_del_analisis_usa_pasos_sencillos(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs)
+    TestClient(client.app).post(f"/r/{token}/archivos", data={"slot": "predial"}, files=[("files", ("p.pdf", tiny_pdf(), "application/pdf"))])
+    TestClient(client.app).post(f"/r/{token}/enviar")
+    fs._progress[exp_id] = [{"stage": "Extrayendo datos con agentes especializados", "detail": "Agentes 3, 4, 5 y 6", "t": 1}]
+    j = client.get(f"/panel/expedientes/{exp_id}/estado.json").json()
+    assert j["step"] == 3 and set(j) == {"status", "step"}                                   # no expone nombres de agentes
+    page = client.get(f"/panel/expedientes/{exp_id}").text
+    assert "Leyendo los documentos" in page and "Preparando el resultado" in page and "Agente" not in page
+
+
+def test_archivos_cifrados_y_eliminacion_con_confirmacion_y_codigo(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs)
+    pub = TestClient(client.app)
+    pub.post(f"/r/{token}/archivos", data={"slot": "escrituras"}, files=[("files", ("a.pdf", tiny_pdf("PROPIETARIO JUAN PEREZ TEXTO SECRETO"), "application/pdf"))])
     store = fs.get_store()
-    exp_id = store.list_ids()[0]
     d = store.enc.data_dir(exp_id)
     blobs = [p for p in d.rglob("*") if p.is_file()]
-    assert blobs and all(p.suffix == ".enc" for p in blobs)
-    assert all(b"JUAN PEREZ" not in p.read_bytes() for p in blobs)
-    url = f"/panel/expedientes/{exp_id}/purgar"
-    assert "Escriba" in client.post(url, data={"confirm": "no", "code": pyotp.TOTP(secret).now()}).headers["location"].replace("+", " ")
-    assert "MFA" in client.post(url, data={"confirm": "PURGAR", "code": "123456"}).headers["location"]
-    assert store.enc.has_key(exp_id)                             # nada se borro sin confirmacion + MFA
-    r = client.post(url, data={"confirm": "PURGAR", "code": pyotp.TOTP(secret).now()})
-    assert r.status_code == 200 and "Purga completada" in r.text
+    assert blobs and all(p.suffix == ".enc" for p in blobs) and all(b"JUAN PEREZ" not in p.read_bytes() for p in blobs)
+    url = f"/panel/expedientes/{exp_id}/eliminar"
+    assert "Confirma" in client.post(url, data={"confirm": "no", "code": pyotp.TOTP(secret).now()}).headers["location"].replace("+", " ").replace("%20", " ")
+    assert "no%20es%20correcto" in client.post(url, data={"confirm": "ELIMINAR", "code": "123456"}).headers["location"]
+    assert store.enc.has_key(exp_id)                              # nada se borro sin confirmacion + codigo
+    r = client.post(url, data={"confirm": "ELIMINAR", "code": pyotp.TOTP(secret).now()})
+    assert r.status_code == 200 and "Expediente eliminado" in r.text
     assert not d.exists() and not store.enc.has_key(exp_id)
     assert client.get(f"/panel/expedientes/{exp_id}").status_code == 404
     from services.purge_service import receipts
@@ -108,9 +179,40 @@ def test_archivos_cifrados_en_disco_y_purga_con_mfa(env):
     assert rc["status"] == "completa" and rc["key_destroyed"] and "JUAN" not in str(rc)
 
 
-def test_reglas_invalidas_no_se_guardan(env):
+def test_expediente_analizado_muestra_secciones_en_lenguaje_sencillo(env):
+    client, secret, calls, fs = env
+    login(client, secret)
+    exp_id, token = new_link(client, fs, "Caso Demo")
+    pub = TestClient(client.app)
+    pub.post(f"/r/{token}/archivos", data={"slot": "predial"}, files=[("files", ("p.pdf", tiny_pdf(), "application/pdf"))])
+    pub.post(f"/r/{token}/enviar")
+    store = fs.get_store()
+    fid = store.get_meta(exp_id)["files"][0]["file_id"]
+    ev = lambda page, frag: {"file_id": fid, "filename": "p.pdf", "page": page, "fragment": frag, "verified": True}
+    result = {"expediente_id": exp_id, "project_type": "store", "documents": [{"file_id": fid, "filename": "p.pdf", "doc_type": "predial", "classification_confidence": .9, "classification_reason": "", "pages_total": 1,
+              "ocr_engine": "x", "elapsed_ms": 1, "pages": [{"page": 1, "status": "ok", "source": "ocr", "ocr_confidence": .9, "issues": []}], "unreadable_pages": [], "has_text": True}],
+              "extractions": [{"file_id": fid, "filename": "p.pdf", "doc_type": "predial", "status": "ok", "fields": {"owner": {"value": "ROSA QUINTANAR", "status": "present", "confidence": .9, "evidence": [ev(1, "PROPIETARIO ROSA QUINTANAR")]}}}],
+              "requirements": [{"requirement_id": "PREDIAL-year-p", "description": "Predial del ejercicio 2020 o posterior", "status": "cumplido", "justification": "El predial corresponde al ejercicio 2025 (mínimo 2020).", "evidence": [ev(1, "2025")]}],
+              "findings": [{"finding_id": "V-01", "description": "x", "finding_type": "validity_unknown", "severity": "low", "agent": "A7", "confidence": .5, "audit_status": "verificado", "evidence": []}],
+              "comparisons": [], "audit": {"stats": {}, "issues": []}, "recommendation": {"verdict": "requiere_revision", "confidence": .7, "explanation": "x", "reason": "x", "disclaimer": "No sustituye al abogado."},
+              "agent_log": [], "timings_ms": {"total": 40000}, "rules_reference": {"version": "1", "sha256": "a" * 64}}
+    store.enc.put_json(exp_id, "resultado", "analisis", result)
+    meta = store.get_meta(exp_id); meta.update(status="analizado", verdict="requiere_revision"); store.put_meta(exp_id, meta)
+    pages = {s: client.get(f"/panel/expedientes/{exp_id}?s={s}") for s in ("resumen", "observaciones", "documentos", "requisitos", "datos", "seguridad", "eliminar")}
+    assert all(r.status_code == 200 for r in pages.values())
+    assert "Requiere revisión" in pages["resumen"].text and "Documentos correctos" in pages["resumen"].text
+    assert "Predial del año 2020 o posterior" in pages["requisitos"].text and "ejercicio" not in pages["requisitos"].text
+    assert "ROSA QUINTANAR" in pages["datos"].text and "Eliminar expediente" in pages["eliminar"].text
+    for name, r in pages.items():
+        low = r.text.lower()
+        for word in ("agente", "regla", "ocr", "llm", "confianza insuficiente", "a7"):
+            assert word not in low, (name, word)
+
+
+def test_reglas_invalidas_no_se_guardan_y_no_estan_en_el_menu(env):
     client, secret, *_ = env
     login(client, secret)
+    assert "reglas" not in client.get("/panel").text.lower()
     assert client.get("/panel/reglas").status_code == 200
     r = client.post("/panel/reglas", data={"text": "meta: {version: x}"})
     assert r.status_code == 400 and "errores de estructura" in r.text

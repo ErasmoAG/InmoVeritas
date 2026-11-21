@@ -1,36 +1,42 @@
 (function(){
-  const T=window.TOKEN, list=document.getElementById('list'), input=document.getElementById('files'), send=document.getElementById('send'),
-        pt=document.getElementById('pt'), bar=document.getElementById('bar'), fill=document.getElementById('barfill'), state=document.getElementById('state'),
-        cancel=document.getElementById('cancel'), hint=document.getElementById('hint');
-  let rows=[], xhr=null;
-  const LABEL={formato_valido:['Aceptado','b-ok'],duplicado:['Duplicado','b-warn'],formato_invalido:['Rechazado','b-err']};
+  const T=window.TOKEN, send=document.getElementById('send'), hint=document.getElementById('hint');
+  const OK='<svg class="i st" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
+        BAD='<svg class="i st" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16v.01"/></svg>',
+        WAIT='<svg class="i st" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+        X='<svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const state={}; // slot -> [{id,name,ok,msg,pending}]
   const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  function render(){
-    if(!rows.length){list.innerHTML='Aún no ha cargado archivos.';}
-    else list.innerHTML='<table><tr><th>Archivo</th><th>Estado</th><th>Detalle</th><th></th></tr>'+rows.map(r=>{
-      const l=LABEL[r.status]||[r.status,'b-pend'];
-      const det=r.rejection?`<b>${esc(r.rejection.message)}</b><br><span class="muted">Qué hacer: ${esc(r.rejection.hint)}</span>`:(r.warnings||[]).map(esc).join('<br>')||`${r.pages||1} página(s)`;
-      const origin=r.source&&r.source.startsWith('zip:')?`<div class="muted">dentro de ${esc(r.source.slice(4))}</div>`:'';
-      return `<tr><td>${esc(r.name)}${origin}</td><td><span class="badge ${l[1]}">${l[0]}</span></td><td>${det}</td><td><button type="button" class="sec" data-id="${r.file_id}">Quitar</button></td></tr>`;}).join('')+'</table>';
-    const ok=rows.some(r=>r.status==='formato_valido'); send.disabled=!(ok&&pt.value);
-    hint.textContent=ok?(pt.value?'Listo para enviar.':'Elija el tipo de proyecto.'):'Cargue al menos un archivo válido y elija el tipo de proyecto.';
+  const friendly=r=>{ if(!r) return 'No se pudo recibir este archivo. Intenta de nuevo.';
+    return (r.message||'No se pudo recibir este archivo.')+(r.hint?' '+r.hint:''); };
+  function render(slot){
+    const box=document.getElementById('files-'+slot), items=state[slot]||[];
+    box.innerHTML=items.map((f,i)=>`<div class="file ${f.pending?'':(f.ok?'ok':'bad')}">${f.pending?WAIT:(f.ok?OK:BAD)}<div class="nm">${esc(f.name)}${f.msg?`<span class="why">${esc(f.msg)}</span>`:''}</div>
+      ${f.pending?'':`<button type="button" class="x" data-slot="${slot}" data-i="${i}" aria-label="Quitar">${X}</button>`}</div>`).join('');
+    document.querySelector(`[data-slot="${slot}"].slot`).classList.toggle('ok',items.some(f=>f.ok));
+    const any=Object.values(state).some(a=>a.some(f=>f.ok)), busy=Object.values(state).some(a=>a.some(f=>f.pending));
+    send.disabled=!any||busy;
+    const missing=[...document.querySelectorAll('.slot')].filter(s=>!(state[s.dataset.slot]||[]).some(f=>f.ok)).map(s=>s.querySelector('h3').textContent);
+    hint.textContent=busy?'Subiendo…':(!any?'Agrega al menos un documento para poder enviar.':(missing.length?'Aún no agregaste: '+missing.join(', ')+'. Puedes enviar ahora o completar después.':'Todo listo para enviar.'));
   }
-  list.addEventListener('click',async e=>{const id=e.target.dataset&&e.target.dataset.id; if(!id)return;
-    await fetch(`/r/${T}/quitar/${id}`,{method:'POST'}); rows=rows.filter(r=>r.file_id!==id); render();});
-  pt.addEventListener('change',render);
-  input.addEventListener('change',()=>{
-    if(!input.files.length)return; const fd=new FormData(); for(const f of input.files)fd.append('files',f);
-    xhr=new XMLHttpRequest(); xhr.open('POST',`/r/${T}/archivos`);
-    bar.style.display='block'; cancel.style.display='inline-block'; fill.style.width='0'; state.textContent='Subiendo y validando archivos…';
-    xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=(100*e.loaded/e.total)+'%';};
-    xhr.onload=()=>{cancel.style.display='none';bar.style.display='none';
-      if(xhr.status===200){const res=JSON.parse(xhr.responseText).results; rows=rows.concat(res);
-        const bad=res.filter(r=>r.status!=='formato_valido').length; state.textContent=`${res.length-bad} aceptado(s), ${bad} con observaciones.`;}
-      else{let m='No se pudo cargar.';try{m=JSON.parse(xhr.responseText).detail||m}catch(_){} state.textContent=m;}
-      input.value='';render();};
-    xhr.onerror=()=>{cancel.style.display='none';state.textContent='Error de conexión. Intente de nuevo.';};
-    xhr.onabort=()=>{cancel.style.display='none';bar.style.display='none';state.textContent='Carga cancelada.';};
-    xhr.send(fd);});
-  cancel.addEventListener('click',()=>xhr&&xhr.abort());
-  render();
+  document.querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>document.getElementById('in-'+b.dataset.pick).click()));
+  document.querySelectorAll('input[type=file]').forEach(inp=>inp.addEventListener('change',()=>{
+    const slot=inp.id.slice(3); if(!inp.files.length) return;
+    const names=[...inp.files].map(f=>f.name); state[slot]=(state[slot]||[]).concat(names.map(n=>({name:n,pending:true})));
+    render(slot);
+    const fd=new FormData(); fd.append('slot',slot); [...inp.files].forEach(f=>fd.append('files',f)); inp.value='';
+    fetch(`/r/${T}/archivos`,{method:'POST',body:fd}).then(async r=>{
+      const j=await r.json().catch(()=>({})); state[slot]=state[slot].filter(f=>!f.pending);
+      if(r.ok){ j.results.forEach(x=>state[slot].push({id:x.file_id,name:x.name,ok:x.status==='formato_valido',msg:x.status==='formato_valido'?'':friendly(x.rejection)})); }
+      else names.forEach(n=>state[slot].push({name:n,ok:false,msg:j.detail||'No se pudo enviar el archivo. Intenta de nuevo.'}));
+      render(slot);
+    }).catch(()=>{ state[slot]=state[slot].filter(f=>!f.pending); names.forEach(n=>state[slot].push({name:n,ok:false,msg:'Se perdió la conexión. Intenta de nuevo.'})); render(slot); });
+  }));
+  document.addEventListener('click',async e=>{
+    const b=e.target.closest('.x'); if(!b) return; const slot=b.dataset.slot, i=+b.dataset.i, f=state[slot][i];
+    if(f.id) await fetch(`/r/${T}/quitar/${f.id}`,{method:'POST'}); state[slot].splice(i,1); render(slot); });
+  send.addEventListener('click',async()=>{
+    send.disabled=true; send.textContent='Enviando…';
+    const r=await fetch(`/r/${T}/enviar`,{method:'POST'}); const j=await r.json().catch(()=>({}));
+    if(r.ok) location.href=`/r/${T}/gracias`; else { hint.textContent=j.error||'No se pudo enviar. Intenta de nuevo.'; send.disabled=false; send.textContent='Enviar documentos'; }
+  });
 })();

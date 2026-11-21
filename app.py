@@ -1,27 +1,26 @@
 """InmoVeritas - aplicacion web (FastAPI). Dos interfaces independientes pero conectadas:
-  /r/{token}  formulario publico de recepcion (la contraparte)         -> activa al Agente 1 al enviarse
-  /panel/...  panel privado del abogado (contrasena + TOTP)
+  /r/{token}  formulario publico: solo 4 documentos para subir (quien vende o entrega los papeles)
+  /panel/...  panel privado de Tiendas 3B (contrasena + codigo de verificacion)
 Ejecutar:  uvicorn app:app --host 127.0.0.1 --port 8000"""
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 from typing import Optional
 
-import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import settings  # noqa: F401  (carga .env)
-from schemas.schemas import DOC_TYPE_LABELS, PROJECT_LABELS, DocType, ProjectType
 from services import mfa_service as auth
 from services import presenter, rules_service
 from services.encryption_service import MissingMasterKey
 from services.form_service import get_store
-from services.purge_service import purge_expediente, receipts
+from services.purge_service import purge_expediente
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="InmoVeritas", docs_url=None, redoc_url=None)
@@ -29,13 +28,27 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
 SESSION_AGE = 8 * 3600
-VERDICT_LABEL = {"cumple": "Cumple", "requiere_revision": "Requiere revisión", "no_cumple": "No cumple", None: "Sin recomendación"}
-STATUS_LABEL = {"esperando": "Esperando documentos", "recibido": "Recibido", "en_analisis": "En análisis", "analizado": "Analizado", "error": "Error en el análisis"}
-FILE_STATUS_LABEL = {"recibido": "Recibido", "formato_valido": "Formato válido", "formato_invalido": "Formato inválido", "duplicado": "Duplicado",
-                     "ilegible": "Ilegible", "en_procesamiento": "En procesamiento", "analizado": "Analizado", "pendiente_revision": "Pendiente de revisión"}
-REQ_LABEL = {"cumplido": "Cumple", "incumplido": "No cumple", "pendiente": "Pendiente de revisión"}
-templates.env.globals.update(VERDICT_LABEL=VERDICT_LABEL, STATUS_LABEL=STATUS_LABEL, FILE_STATUS_LABEL=FILE_STATUS_LABEL, REQ_LABEL=REQ_LABEL,
-                             PROJECT_LABELS={k.value: v for k, v in PROJECT_LABELS.items()}, DOC_LABELS={k.value: v for k, v in DOC_TYPE_LABELS.items()})
+SLOTS = [("escrituras", "Escrituras", "Escritura o título de propiedad del inmueble"),
+         ("predial", "Predial", "Recibo o boleta del impuesto predial"),
+         ("alineamiento_numero_oficial", "Alineamiento y Número Oficial", "Constancia de alineamiento y número oficial"),
+         ("uso_suelo", "Uso de Suelo", "Licencia o constancia de uso de suelo")]
+SLOT_KEYS = {k for k, _, _ in SLOTS}
+PROJECT_LABELS = {"store": "Tienda", "cedis": "Centro de distribución"}
+STATE_LABEL = {"esperando": ("Esperando documentos", "gris"), "recibido": ("Analizando", "azul"), "en_analisis": ("Analizando", "azul"),
+               "analizado": ("Listo", "verde"), "error": ("No se pudo analizar", "rojo")}
+VERDICT_LABEL = {"cumple": ("Cumple", "verde"), "requiere_revision": ("Requiere revisión", "ambar"), "no_cumple": ("No cumple", "rojo")}
+FILE_LABEL = {"formato_valido": "Recibido", "analizado": "Revisado", "formato_invalido": "No aceptado", "duplicado": "Repetido", "ilegible": "No se pudo leer"}
+
+
+def _new_count() -> int:
+    try:
+        return sum(1 for m in get_store().list_metas() if m["status"] in ("recibido", "en_analisis", "analizado", "error") and not m.get("opened_at"))
+    except Exception:
+        return 0
+
+
+templates.env.globals.update(STATE_LABEL=STATE_LABEL, VERDICT_LABEL=VERDICT_LABEL, PROJECT_LABELS=PROJECT_LABELS, FILE_LABEL=FILE_LABEL, SLOTS=SLOTS,
+                             new_count=_new_count, PROGRESS_STEPS=presenter.PROGRESS_STEPS)
 
 
 def _ser() -> URLSafeTimedSerializer:
@@ -59,6 +72,15 @@ def lawyer(request: Request) -> str:
 def _set_session(resp, username: str, stage: str):
     resp.set_cookie("inmo_session", _ser().dumps({"u": username, "stage": stage}), httponly=True, samesite="strict", max_age=SESSION_AGE)
     return resp
+
+
+def _public_base(request: Request) -> str:
+    """Direccion que se comparte con el cliente. Defina INMO_PUBLIC_URL si la app se publica con otro nombre o por internet."""
+    return (os.environ.get("INMO_PUBLIC_URL") or str(request.base_url)).rstrip("/")
+
+
+def _link(request: Request, exp_id: str) -> str:
+    return f"{_public_base(request)}/r/{get_store().make_token(exp_id)}"
 
 
 @app.exception_handler(MissingMasterKey)
@@ -85,21 +107,21 @@ def intake_form(request: Request, token: str):
     if not exp_id:
         return templates.TemplateResponse(request, "intake_invalid.html", {}, status_code=404)
     if meta["status"] != "esperando":
-        return templates.TemplateResponse(request, "intake_done.html", {"meta": meta})
-    return templates.TemplateResponse(request, "intake.html", {"token": token, "meta": meta})
+        return templates.TemplateResponse(request, "intake_done.html", {"just_sent": False})
+    return templates.TemplateResponse(request, "intake.html", {"token": token})
 
 
 @app.post("/r/{token}/archivos")
-async def intake_upload(token: str, files: list[UploadFile] = File(...)):
+async def intake_upload(token: str, slot: str = Form(""), files: list[UploadFile] = File(...)):
     exp_id, meta = _intake_ctx(token)
     if not exp_id:
-        raise HTTPException(404, "Enlace no válido o vencido.")
+        raise HTTPException(404, "Este enlace ya no está disponible.")
     items = [(f.filename or "archivo", await f.read()) for f in files]
     try:
-        results = get_store().stage_files(exp_id, items)
+        results = get_store().stage_files(exp_id, items, declared=slot if slot in SLOT_KEYS else None)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    return {"results": results}
+    return {"results": [{"file_id": r["file_id"], "name": r["name"], "status": r["status"], "rejection": r["rejection"]} for r in results]}
 
 
 @app.post("/r/{token}/quitar/{file_id}")
@@ -110,20 +132,24 @@ def intake_remove(token: str, file_id: str):
     return {"removed": get_store().remove_file(exp_id, file_id)}
 
 
-@app.post("/r/{token}/enviar", response_class=HTMLResponse)
-def intake_submit(request: Request, token: str, applicant: str = Form(""), project_type: str = Form("")):
+@app.post("/r/{token}/enviar")
+def intake_submit(request: Request, token: str):
     exp_id, meta = _intake_ctx(token)
     if not exp_id:
         return templates.TemplateResponse(request, "intake_invalid.html", {}, status_code=404)
     try:
-        meta = get_store().submit(exp_id, applicant, project_type)
+        get_store().submit(exp_id)
     except ValueError as exc:
-        meta = get_store().get_meta(exp_id)
-        return templates.TemplateResponse(request, "intake.html", {"token": token, "meta": meta, "error": str(exc)}, status_code=400)
-    return templates.TemplateResponse(request, "intake_done.html", {"meta": meta, "just_sent": True})
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True})
 
 
-# ======================================================================= PANEL
+@app.get("/r/{token}/gracias", response_class=HTMLResponse)
+def intake_thanks(request: Request, token: str):
+    return templates.TemplateResponse(request, "intake_done.html", {"just_sent": True})
+
+
+# ======================================================================= ACCESO
 @app.get("/panel/login", response_class=HTMLResponse)
 def login_page(request: Request):
     s = _session(request)
@@ -133,9 +159,9 @@ def login_page(request: Request):
 @app.post("/panel/login", response_class=HTMLResponse)
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     if auth.is_locked(username):
-        return templates.TemplateResponse(request, "login.html", {"stage": "none", "has_users": True, "error": "Demasiados intentos fallidos. Espere unos minutos."}, status_code=429)
+        return templates.TemplateResponse(request, "login.html", {"stage": "none", "has_users": True, "error": "Demasiados intentos. Espere unos minutos e intente de nuevo."}, status_code=429)
     if not auth.verify_password(username, password):
-        return templates.TemplateResponse(request, "login.html", {"stage": "none", "has_users": auth.has_users(), "error": "Usuario o contraseña incorrectos."}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", {"stage": "none", "has_users": auth.has_users(), "error": "El usuario o la contraseña no son correctos."}, status_code=401)
     return _set_session(templates.TemplateResponse(request, "login.html", {"stage": "pwd", "has_users": True, "error": None}), username, "pwd")
 
 
@@ -145,7 +171,7 @@ def mfa(request: Request, code: str = Form(...)):
     if s.get("stage") not in ("pwd", "full") or not s.get("u"):
         return RedirectResponse("/panel/login", status_code=303)
     if not auth.verify_totp(s["u"], code):
-        return templates.TemplateResponse(request, "login.html", {"stage": "pwd", "has_users": True, "error": "Código incorrecto o vencido."}, status_code=401)
+        return templates.TemplateResponse(request, "login.html", {"stage": "pwd", "has_users": True, "error": "El código no es correcto o ya venció."}, status_code=401)
     return _set_session(RedirectResponse("/panel", status_code=303), s["u"], "full")
 
 
@@ -156,101 +182,132 @@ def logout():
     return r
 
 
-def _counts(metas: list[dict]) -> dict:
-    c = {"total": len(metas), "en_analisis": 0, "analizados": 0, "invalidos": 0, "ilegibles": 0, "revision": 0, "cumple": 0, "no_cumple": 0}
-    for m in metas:
-        c["en_analisis"] += m["status"] in ("recibido", "en_analisis")
-        c["analizados"] += m["status"] == "analizado"
-        c["invalidos"] += any(f["status"] == "formato_invalido" for f in m["files"])
-        c["ilegibles"] += any(f["status"] == "ilegible" for f in m["files"])
-        c["revision"] += m.get("verdict") == "requiere_revision"
-        c["cumple"] += m.get("verdict") == "cumple"
-        c["no_cumple"] += m.get("verdict") == "no_cumple"
-    return c
+# ======================================================================= PANEL
+def _row(m: dict) -> dict:
+    slots_ok = {f.get("declared") for f in m["files"] if f["status"] in ("formato_valido", "analizado", "ilegible") and f.get("declared")}
+    state, color = STATE_LABEL.get(m["status"], (m["status"], "gris"))
+    v = VERDICT_LABEL.get(m.get("verdict"))
+    return {**m, "state": state, "state_color": color, "verdict_label": v[0] if v else None, "verdict_color": v[1] if v else None, "docs_ok": len(slots_ok),
+            "is_new": m["status"] in ("recibido", "en_analisis", "analizado", "error") and not m.get("opened_at"), "project_label": PROJECT_LABELS.get(m.get("project_type"), "—")}
 
 
 @app.get("/panel", response_class=HTMLResponse)
-def dashboard(request: Request, user: str = Depends(lawyer), q: str = "", estado: str = "", nuevo: str = ""):
-    metas = get_store().list_metas()
-    counts = _counts(metas)
-    shown = [m for m in metas if (not q or q.lower() in (m["exp_id"] + m.get("applicant", "") + m.get("reference", "")).lower())
-             and (not estado or m["status"] == estado or m.get("verdict") == estado)]
-    rows = []
-    for m in shown:
-        fs = m["files"]
-        rows.append({**m, "n_docs": len(fs), "n_valid": sum(f["status"] in ("formato_valido", "analizado", "ilegible") for f in fs),
-                     "n_rej": sum(f["status"] in ("formato_invalido", "duplicado") for f in fs), "n_ileg": sum(f["status"] == "ilegible" for f in fs)})
-    link = None
-    if nuevo:
-        link = str(request.base_url).rstrip("/") + "/r/" + nuevo
-    return templates.TemplateResponse(request, "dashboard.html", {"user": user, "counts": counts, "rows": rows, "q": q, "estado": estado, "link": link,
-                                                                   "purges": receipts()[-5:][::-1], "rules": rules_service.load_rules().reference()})
+def home(request: Request, user: str = Depends(lawyer)):
+    rows = [_row(m) for m in get_store().list_metas()]
+    c = {"nuevas": sum(r["is_new"] for r in rows), "analizando": sum(r["status"] in ("recibido", "en_analisis") for r in rows),
+         "revisar": sum(r.get("verdict") == "requiere_revision" for r in rows), "cumplen": sum(r.get("verdict") == "cumple" for r in rows),
+         "no_cumplen": sum(r.get("verdict") == "no_cumple" for r in rows), "esperando": sum(r["status"] == "esperando" for r in rows)}
+    return templates.TemplateResponse(request, "home.html", {"user": user, "nav": "inicio", "c": c, "new": [r for r in rows if r["is_new"]][:6], "recent": rows[:6], "total": len(rows)})
 
 
-@app.post("/panel/enlaces")
-def create_link(user: str = Depends(lawyer), reference: str = Form("")):
-    exp_id, token = get_store().create_link(reference)
-    return RedirectResponse(f"/panel?nuevo={token}", status_code=303)
+@app.get("/panel/nuevo", response_class=HTMLResponse)
+def link_new(request: Request, user: str = Depends(lawyer), error: str = ""):
+    return templates.TemplateResponse(request, "link_new.html", {"user": user, "nav": "nuevo", "error": error})
 
 
-def _security(exp_id: str, session_ok: bool) -> list[dict]:
+@app.post("/panel/nuevo")
+def link_create(user: str = Depends(lawyer), applicant: str = Form(""), project_type: str = Form("")):
+    try:
+        exp_id, _ = get_store().create_link(applicant, project_type)
+    except ValueError as exc:
+        from urllib.parse import quote
+        return RedirectResponse(f"/panel/nuevo?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/panel/enlaces/{exp_id}", status_code=303)
+
+
+@app.get("/panel/enlaces/{exp_id}", response_class=HTMLResponse)
+def link_ready(request: Request, exp_id: str, user: str = Depends(lawyer)):
     store = get_store()
-    enc = store.enc
+    if not store.enc.has_key(exp_id):
+        raise HTTPException(404, "Expediente no encontrado.")
+    meta = store.get_meta(exp_id)
+    link = _link(request, exp_id)
+    from urllib.parse import quote
+    wa = "https://wa.me/?text=" + quote(f"Hola, para continuar con la revisión de su inmueble, suba sus documentos en este enlace: {link}")
+    local_only = any(h in link.split("/")[2] for h in ("127.0.0.1", "localhost", "[::1]"))
+    return templates.TemplateResponse(request, "link_ready.html", {"user": user, "nav": "nuevo", "meta": meta, "link": link, "wa": wa, "local_only": local_only})
+
+
+@app.get("/panel/qr/{exp_id}.png")
+def qr_png(request: Request, exp_id: str, user: str = Depends(lawyer)):
+    if not get_store().enc.has_key(exp_id):
+        raise HTTPException(404)
+    return Response(base64.b64decode(auth.qr_png_b64(_link(request, exp_id))), media_type="image/png")
+
+
+@app.get("/panel/expedientes", response_class=HTMLResponse)
+def expedientes(request: Request, user: str = Depends(lawyer), q: str = "", f: str = ""):
+    rows = [_row(m) for m in get_store().list_metas()]
+
+    def match(r) -> bool:
+        if q and q.lower() not in (r["exp_id"] + r.get("applicant", "") + r.get("reference", "")).lower():
+            return False
+        return {"": True, "nuevas": r["is_new"], "analizando": r["status"] in ("recibido", "en_analisis"), "esperando": r["status"] == "esperando",
+                "cumple": r.get("verdict") == "cumple", "revisar": r.get("verdict") == "requiere_revision", "no_cumple": r.get("verdict") == "no_cumple"}.get(f, True)
+    return templates.TemplateResponse(request, "expedientes.html", {"user": user, "nav": "expedientes", "rows": [r for r in rows if match(r)], "q": q, "f": f, "total": len(rows)})
+
+
+SECTIONS = [("resumen", "Resumen"), ("observaciones", "Observaciones"), ("documentos", "Documentos"), ("requisitos", "Requisitos"), ("datos", "Datos del inmueble"),
+            ("seguridad", "Seguridad"), ("eliminar", "Eliminar")]
+
+
+def _security(exp_id: str) -> list[dict]:
+    enc = get_store().enc
     d = enc.data_dir(exp_id)
     files = [p for p in d.rglob("*") if p.is_file()] if d.exists() else []
     plain = [p for p in files if p.suffix != ".enc"]
-    have_key = enc.has_key(exp_id)
-    ok_enc = have_key and bool(files) and not plain
-    meta = store.get_meta(exp_id) if have_key else {}
-    return [
-        {"name": "Cifrado AES-256-GCM", "ok": ok_enc, "detail": f"{len(files)} archivo(s) cifrado(s); sin archivos en texto plano" if ok_enc else "No verificado"},
-        {"name": "Autenticación MFA", "ok": session_ok, "detail": "Sesión con contraseña + TOTP verificados" if session_ok else "Sin sesión verificada"},
-        {"name": "Protección del expediente", "ok": have_key, "detail": "Clave propia del expediente, separada de los archivos" if have_key else "Clave no disponible"},
-        {"name": "Procesamiento", "ok": meta.get("status") == "analizado", "detail": STATUS_LABEL.get(meta.get("status"), "—")},
-        {"name": "Almacenamiento", "ok": bool(files) and not plain, "detail": "Almacenamiento local cifrado (no público)" if files else "Sin datos"},
-        {"name": "Eliminación", "ok": False, "detail": "No purgado (la purga está disponible con confirmación y MFA)"},
-    ]
+    ok = bool(files) and not plain and enc.has_key(exp_id)
+    return [{"name": "Documentos protegidos", "ok": ok, "text": "Todos los archivos se guardan cifrados; no hay copias legibles." if ok else "No se pudo comprobar la protección."},
+            {"name": "Acceso verificado", "ok": True, "text": "Entraste con tu contraseña y el código de verificación."},
+            {"name": "Clave propia del expediente", "ok": enc.has_key(exp_id), "text": "Este expediente tiene su propia clave, guardada aparte de los archivos."},
+            {"name": "Eliminación", "ok": False, "text": "Este expediente no se ha eliminado. Puedes eliminarlo en la sección «Eliminar»."}]
 
 
 @app.get("/panel/expedientes/{exp_id}", response_class=HTMLResponse)
-def detail(request: Request, exp_id: str, user: str = Depends(lawyer), purgado: str = ""):
+def detail(request: Request, exp_id: str, user: str = Depends(lawyer), s: str = "resumen", error: str = ""):
     store = get_store()
     if not store.enc.has_key(exp_id):
-        raise HTTPException(404, "Expediente no encontrado o purgado.")
+        raise HTTPException(404, "Este expediente no existe o ya fue eliminado.")
+    store.mark_opened(exp_id)
     meta = store.get_meta(exp_id)
     result = store.get_result(exp_id)
-    ev_by_file = {}
-    if result:
-        for rq in result["requirements"]:
-            pass
-    plain = presenter.build(result, meta) if result else None   # capa de presentacion: no re-evalua, solo explica
-    return templates.TemplateResponse(request, "detail.html", {"user": user, "meta": meta, "r": result, "p": plain, "security": _security(exp_id, True),
-                                                               "progress": store.progress(exp_id), "error": request.query_params.get("error")})
+    plain = presenter.build(result, meta) if result else None
+    if s not in {k for k, _ in SECTIONS}:
+        s = "resumen"
+    state, color = STATE_LABEL.get(meta["status"], (meta["status"], "gris"))
+    files = [{**f, "label": FILE_LABEL.get(f["status"], f["status"]), "slot": next((t for k, t, _ in SLOTS if k == f.get("declared")), "—")} for f in meta["files"]]
+    return templates.TemplateResponse(request, "detail.html", {"user": user, "nav": "expedientes", "meta": meta, "p": plain, "section": s, "sections": SECTIONS, "state": state, "state_color": color,
+                                                               "files": files, "security": _security(exp_id), "error": error, "link": _link(request, exp_id) if meta["status"] == "esperando" else None,
+                                                               "timing": round(result["timings_ms"]["total"] / 1000) if result else None})
 
 
 @app.get("/panel/expedientes/{exp_id}/estado.json")
 def status_json(exp_id: str, user: str = Depends(lawyer)):
     store = get_store()
     if not store.enc.has_key(exp_id):
-        return JSONResponse({"status": "purgado"})
+        return JSONResponse({"status": "purgado", "step": 0})
     meta = store.get_meta(exp_id)
-    return {"status": meta["status"], "progress": store.progress(exp_id) or meta.get("progress", []), "verdict": meta.get("verdict")}
+    prog = store.progress(exp_id) or meta.get("progress", [])
+    step = max([presenter.progress_step(p["stage"]) for p in prog] or [0])
+    return {"status": meta["status"], "step": step if meta["status"] != "analizado" else len(presenter.PROGRESS_STEPS)}
 
 
-@app.post("/panel/expedientes/{exp_id}/purgar")
+@app.post("/panel/expedientes/{exp_id}/eliminar")
 def purge(request: Request, exp_id: str, user: str = Depends(lawyer), code: str = Form(""), confirm: str = Form("")):
-    if confirm.strip().upper() != "PURGAR":
-        return RedirectResponse(f"/panel/expedientes/{exp_id}?error=Escriba+PURGAR+para+confirmar", status_code=303)
+    from urllib.parse import quote
+    if confirm != "ELIMINAR":
+        return RedirectResponse(f"/panel/expedientes/{exp_id}?s=eliminar&error={quote('Confirma que quieres eliminarlo.')}", status_code=303)
     if not auth.verify_totp(user, code):
-        return RedirectResponse(f"/panel/expedientes/{exp_id}?error=Código+MFA+incorrecto", status_code=303)
+        return RedirectResponse(f"/panel/expedientes/{exp_id}?s=eliminar&error={quote('El código no es correcto. Intenta de nuevo.')}", status_code=303)
     receipt = purge_expediente(get_store().enc, exp_id)
-    return templates.TemplateResponse(request, "purged.html", {"receipt": receipt})
+    return templates.TemplateResponse(request, "purged.html", {"user": user, "nav": "expedientes", "receipt": receipt})
 
 
+# Administracion de requisitos: sin enlace en el menu (no es parte del uso diario); solo con sesion verificada.
 @app.get("/panel/reglas", response_class=HTMLResponse)
 def rules_page(request: Request, user: str = Depends(lawyer), msg: str = "", err: str = ""):
     loaded = rules_service.load_rules()
-    return templates.TemplateResponse(request, "rules.html", {"user": user, "ref": loaded.reference(), "text": Path(loaded.path).read_text(encoding="utf-8"),
+    return templates.TemplateResponse(request, "rules.html", {"user": user, "nav": "", "ref": loaded.reference(), "text": Path(loaded.path).read_text(encoding="utf-8"),
                                                               "history": rules_service.rules_history()[::-1], "msg": msg, "err": err})
 
 
@@ -260,5 +317,5 @@ def rules_update(request: Request, user: str = Depends(lawyer), text: str = Form
         rules_service.update_rules(text.replace("\r\n", "\n"), actor=user)
     except rules_service.RulesError as exc:
         loaded = rules_service.load_rules()
-        return templates.TemplateResponse(request, "rules.html", {"user": user, "ref": loaded.reference(), "text": text, "history": rules_service.rules_history()[::-1], "msg": "", "err": str(exc)}, status_code=400)
+        return templates.TemplateResponse(request, "rules.html", {"user": user, "nav": "", "ref": loaded.reference(), "text": text, "history": rules_service.rules_history()[::-1], "msg": "", "err": str(exc)}, status_code=400)
     return RedirectResponse("/panel/reglas?msg=Reglas+actualizadas", status_code=303)

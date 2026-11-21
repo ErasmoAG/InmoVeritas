@@ -1,7 +1,9 @@
-{% extends "base.html" %}{% block content %}
-<h1>Purga {{ 'completada' if receipt.status == 'completa' else 'incompleta' }}</h1>
-<div class="alert {{ 'ok' if receipt.status == 'completa' else 'warn' }}">Expediente <b>{{ receipt.expediente }}</b>: {{ receipt.files_deleted }} archivo(s) eliminados · clave de cifrado {{ 'destruida' if receipt.key_destroyed else 'NO destruida' }}.</div>
-{% if receipt.pending %}<div class="alert err"><b>Pendiente:</b><ul>{% for p in receipt.pending %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
-<p class="muted">Constancia {{ receipt.purge_id }} · {{ receipt.purged_at }}. La constancia no contiene datos personales ni contenido documental. {{ receipt.notice }}</p>
-<a class="btn" href="/panel">Volver a expedientes</a>
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Expediente eliminado{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>{{ 'Expediente eliminado' if receipt.status == 'completa' else 'Eliminación incompleta' }}</h1></div></div>
+<div class="callout {{ 'verde' if receipt.status == 'completa' else 'ambar' }}">{{ icon('check' if receipt.status == 'completa' else 'alert') }}
+  <div>{% if receipt.status == 'completa' %}Se eliminaron los documentos y la información del expediente.{% else %}No se pudo eliminar todo. Avisa a Sistemas.{% endif %}</div></div>
+{% if receipt.pending %}<div class="card"><b>Pendiente</b><ul>{% for p in receipt.pending %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+<p class="small">Quedó una constancia de la eliminación (sin datos personales). Si existen copias de seguridad fuera del sistema, esas no se eliminan automáticamente.</p>
+<a class="btn" href="/panel/expedientes">Volver a expedientes</a>
 {% endblock %}

@@ -1,8 +1,16 @@
-<!doctype html>
+{% from "_icons.html" import icon %}<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}InmoVeritas{% endblock %}</title><link rel="stylesheet" href="/static/app.css"></head>
-<body>
-<header class="top"><div class="brand">InmoVeritas <b>3B</b></div>
-{% if user is defined and user %}<nav><a href="/panel">Expedientes</a><a href="/panel/reglas">Reglas</a></nav><div class="sp"></div><span class="muted" style="color:#ddd">{{ user }}</span><a href="/panel/logout" style="color:#fff">Salir</a>
-{% else %}<div class="sp"></div><span style="font-size:13px;opacity:.8">Recepción segura de documentos</span>{% endif %}</header>
-<main>{% block content %}{% endblock %}</main></body></html>
+<title>{% block title %}InmoVeritas{% endblock %} · Tiendas 3B</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="app">
+<aside class="side">
+  <div class="brand"><span class="mark">3B</span> InmoVeritas</div>
+  <nav>
+    <a href="/panel" class="{{ 'on' if nav == 'inicio' }}">{{ icon('home') }} Inicio</a>
+    <a href="/panel/nuevo" class="{{ 'on' if nav == 'nuevo' }}">{{ icon('plus') }} Nueva solicitud</a>
+    <a href="/panel/expedientes?f=nuevas" class="{{ 'on' if nav == 'nuevas' }}">{{ icon('bell') }} Nuevas {% set n = new_count() %}{% if n %}<span class="nuevo">{{ n }}</span>{% endif %}</a>
+    <a href="/panel/expedientes" class="{{ 'on' if nav == 'expedientes' }}">{{ icon('folder') }} Expedientes</a>
+  </nav>
+  <div class="user">{{ icon('lock') }} {{ user }}<br><a href="/panel/logout">Cerrar sesión</a></div>
+</aside>
+<main class="main">{% block content %}{% endblock %}</main>
+</div></body></html>

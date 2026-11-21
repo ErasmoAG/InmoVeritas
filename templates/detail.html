@@ -1,72 +1,87 @@
-{% extends "base.html" %}{% block title %}{{ meta.exp_id }} · InmoVeritas{% endblock %}
-{% macro ev(list) %}{% for e in list %}<details><summary>Evidencia: {{ e.filename }} · pág. {{ e.page or '?' }} · {% if e.verified %}comprobada en el original{% elif e.verified == false %}NO comprobada{% else %}sin comprobar{% endif %}</summary><div class="frag">{{ e.fragment }}</div></details>{% endfor %}{% endmacro %}
-{% macro status_badge(s, label) %}<span class="badge {{ {'correcto':'b-ok','requiere_revision':'b-warn','pendiente':'b-warn','no_cumple':'b-err','ilegible':'b-err','faltante':'b-pend'}[s] }}">{{ label }}</span>{% endmacro %}
-{% block content %}
-<p><a href="/panel">← Volver a expedientes</a></p>
-<h1>{{ meta.exp_id }} <span class="muted" style="font-size:15px">· {{ meta.applicant or 'Sin nombre' }} · {{ PROJECT_LABELS.get(meta.project_type, '—') }}</span></h1>
-
-{% if meta.status in ('recibido','en_analisis') %}
-<div class="card" id="live" style="margin-top:14px"><b>Análisis en curso…</b><div class="bar" style="margin:8px 0"><i style="width:60%"></i></div><ol id="steps" class="muted"></ol></div>
-<script>(async function tick(){const r=await fetch('/panel/expedientes/{{ meta.exp_id }}/estado.json');const j=await r.json();
-document.getElementById('steps').innerHTML=(j.progress||[]).map(p=>`<li>${p.stage} <span class="muted">(${p.t}s)</span> ${p.detail||''}</li>`).join('');
-if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.reload();}else{setTimeout(tick,1500);}})();</script>
-{% elif meta.status == 'error' %}<div class="alert err">El análisis no pudo completarse: {{ meta.error }}. Revise que Ollama esté en ejecución y vuelva a intentarlo.</div>
-{% elif r and p %}
-
-<h2>Situación general del expediente</h2>
-<div class="card"><span class="verdict" style="background:{{ {'cumple':'var(--ok)','requiere_revision':'var(--warn)','no_cumple':'var(--err)'}[p.verdict] }}">{{ p.verdict_label }}</span>
-<span class="muted" style="margin-left:12px">Confianza del análisis: <b>{{ (p.confidence*100)|int }} %</b> · Tiempo de análisis: {{ (r.timings_ms.total/1000)|round(1) }} s</span>
-<p class="summary">{{ p.summary }}</p>
-<p class="final"><b>Recomendación:</b> {{ p.final_text }}</p>
-<p class="muted">{{ p.disclaimer }}</p></div>
-
-<div class="secbar" style="margin-bottom:6px">{% for s in security %}<div class="sec"><b><span class="dot {{ 'ok' if s.ok }}"></span>{{ s.name }}</b>{{ s.detail }}</div>{% endfor %}</div>
-
-<h2>Lo que necesita atención</h2>
-{% for f in p.findings %}
-<div class="card finding sev-{{ f.severity }}">
-  <div class="ftitle"><span class="badge {{ {'high':'b-err','medium':'b-warn','low':'b-pend'}[f.severity] }}">{{ f.severity_label }}</span> <b>{{ f.title }}</b></div>
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}{{ meta.applicant }}{% endblock %}
+{% macro ev(list) %}{% for e in list %}<div class="where" style="margin-top:8px"><b>{{ e.doc }}{% if e.page %}, página {{ e.page }}{% endif %}</b></div><div class="frag">{{ e.fragment }}</div>{% endfor %}{% endmacro %}
+{% macro obs(f) %}<div class="obs {{ {'high':'alta','medium':'','low':'baja'}[f.severity] }}">
+  <h3><span class="pill {{ {'high':'rojo','medium':'ambar','low':'gris'}[f.severity] }}">{{ f.severity_label }}</span> {{ f.title }}</h3>
   <p>{{ f.text }}</p>
-  <p class="muted"><b>Por qué importa:</b> {{ f.why }}</p>
-  <div class="rec"><b>Qué hacer:</b> {{ f.recommendation }}</div>
-  {% if f.docs %}<div class="docs-line">Documentos relacionados: {% for d in f.docs %}{{ d.label }}{% if d.page %}, página {{ d.page }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
-  {% if f.evidence %}<details><summary>Ver dónde aparece en los documentos</summary>
-    {% for e in f.evidence %}<div class="docs-line" style="margin-top:6px"><b>{{ e.doc }}{% if e.page %}, página {{ e.page }}{% endif %}</b> · {% if e.verified %}texto comprobado en el original{% elif e.verified == false %}no se pudo comprobar en el original{% else %}sin comprobar{% endif %}</div><div class="frag">{{ e.fragment }}</div>{% endfor %}</details>{% endif %}
+  <div class="todo"><b>Qué hacer:</b> {{ f.recommendation }}</div>
+  {% if f.docs %}<div class="where">Documentos: {% for d in f.docs %}{{ d.label }}{% if d.page %}, página {{ d.page }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  <details><summary>Ver más detalle</summary><p class="muted" style="margin-top:8px"><b>Por qué importa:</b> {{ f.why }}</p>
+    {% if f.evidence %}{{ ev(f.evidence) }}{% else %}<p class="small">No hay un fragmento del documento para mostrar en este punto.</p>{% endif %}</details></div>{% endmacro %}
+{% block content %}
+<div class="pagehead"><div><p><a href="/panel/expedientes">← Expedientes</a></p><h1>{{ meta.applicant }}</h1>
+  <p>{{ PROJECT_LABELS.get(meta.project_type, '—') }} · {{ (meta.submitted_at or meta.created_at)[:10] }} · <span class="pill {{ state_color }}">{{ state }}</span></p></div></div>
+
+{% if meta.status == 'esperando' %}
+<div class="callout azul">{{ icon('clock') }}<div><b>Esperando los documentos.</b> {{ meta.applicant }} todavía no los ha enviado. Comparte el enlace o el código QR.</div></div>
+<div class="card"><div class="linkbox"><input type="text" value="{{ link }}" readonly onclick="this.select()"><a class="btn" href="/panel/enlaces/{{ meta.exp_id }}">Ver enlace y código QR</a></div></div>
+
+{% elif meta.status in ('recibido', 'en_analisis') %}
+<div class="card" style="max-width:620px"><h2>Estamos revisando los documentos</h2><p class="muted">Esto toma alrededor de un minuto. Puedes quedarte en esta página.</p>
+  <ul class="steps" id="steps">{% for s in PROGRESS_STEPS %}<li data-i="{{ loop.index0 }}"><span class="c">{{ icon('check') }}</span>{{ s }}</li>{% endfor %}</ul></div>
+<script>(function tick(){fetch('/panel/expedientes/{{ meta.exp_id }}/estado.json').then(r=>r.json()).then(j=>{
+document.querySelectorAll('#steps li').forEach(li=>{var i=+li.dataset.i;li.className=i<j.step?'done':(i===j.step?'now':'');});
+if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.reload();}else{setTimeout(tick,1500);}}).catch(()=>setTimeout(tick,3000));})();</script>
+
+{% elif meta.status == 'error' %}
+<div class="callout rojo">{{ icon('alert') }}<div><b>No se pudo terminar la revisión.</b> Esto suele pasar cuando el programa que lee los documentos no está encendido. Pide ayuda a Sistemas.</div></div>
+
+{% elif p %}
+<div class="exp">
+  <nav class="submenu">{% for key, label in sections %}<a href="?s={{ key }}" class="{{ 'on' if section == key }}"><span>{{ label }}</span>{% if key == 'observaciones' and p.main %}<span class="cnt">{{ p.main|length }}</span>{% endif %}</a>{% endfor %}</nav>
+  <div>
+  {% if section == 'resumen' %}
+    {% set vc = {'cumple':'verde','requiere_revision':'ambar','no_cumple':'rojo'}[p.verdict] %}
+    <div class="veredicto {{ vc }}"><div class="ic">{{ icon({'cumple':'check','requiere_revision':'alert','no_cumple':'x'}[p.verdict]) }}</div>
+      <div><h2>{{ p.verdict_label }}</h2><p>{{ p.final_text }}</p></div></div>
+    <div class="miniStats"><div><b style="color:var(--verde)">{{ p.counts.ok }}</b><span>Documentos correctos</span></div><div><b style="color:var(--ambar)">{{ p.counts.problems }}</b><span>Con observaciones</span></div><div><b>{{ p.counts.missing }}</b><span>Faltantes</span></div></div>
+    <div class="card"><h2>¿Qué pasó?</h2><p>{{ p.summary }}</p>
+      {% if p.main %}<h3 style="margin-top:14px">Lo más importante</h3><ul>{% for f in p.main[:4] %}<li>{{ f.title }}</li>{% endfor %}</ul><a class="btn sec sm" href="?s=observaciones">Ver las observaciones</a>{% endif %}</div>
+    <p class="small">{{ p.disclaimer }}</p>
+
+  {% elif section == 'observaciones' %}
+    <h2>Observaciones</h2>
+    {% if not p.main and not p.missing %}<div class="callout verde">{{ icon('check') }}<div>No hay observaciones importantes en este expediente.</div></div>{% endif %}
+    {% for f in p.main %}{{ obs(f) }}{% endfor %}
+    {% for m in p.missing %}<div class="obs"><h3><span class="pill gris">Falta</span> {{ m.label }}</h3><p>{{ m.text }}</p><div class="todo"><b>Qué hacer:</b> {{ m.recommendation }}</div></div>{% endfor %}
+    {% if p.minor %}<details class="card"><summary>Otras observaciones menores ({{ p.minor|length }})</summary><div style="margin-top:12px">{% for f in p.minor %}{{ obs(f) }}{% endfor %}</div></details>{% endif %}
+
+  {% elif section == 'documentos' %}
+    <h2>Documentos</h2>
+    <div class="docgrid">{% for c in p.documents %}{% set col = {'correcto':'verde','requiere_revision':'ambar','pendiente':'ambar','no_cumple':'rojo','ilegible':'rojo','faltante':'gris'}[c.status] %}
+      <div class="doc {{ col }} {{ 'dash' if c.status == 'faltante' }}"><h3>{{ c.label }}</h3><span class="pill {{ col }}">{{ c.status_label }}</span><p class="muted" style="margin:8px 0 0">{{ c.status_help }}</p>
+      {% if c.reasons %}<ul>{% for x in c.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}</div>{% endfor %}</div>
+    <p class="small" style="margin-top:10px">«Correcto» significa que no se encontraron problemas al revisar el contenido; no basta con que el archivo se haya recibido.</p>
+    <div class="card" style="margin-top:18px"><h2>Archivos recibidos</h2>
+      <table><thead><tr><th>Archivo</th><th>Lugar donde lo subieron</th><th>Estado</th></tr></thead><tbody>
+      {% for f in files %}<tr><td>{{ f.name }}</td><td>{{ f.slot }}</td><td><span class="pill {{ {'formato_valido':'verde','analizado':'verde','ilegible':'rojo','duplicado':'ambar','formato_invalido':'rojo'}.get(f.status,'gris') }}">{{ f.label }}</span></td></tr>{% endfor %}
+      </tbody></table></div>
+
+  {% elif section == 'requisitos' %}
+    <h2>Requisitos</h2>
+    <div class="card" style="padding:6px 10px"><table><thead><tr><th>Requisito</th><th>Resultado</th><th>Explicación</th></tr></thead><tbody>
+      {% for q in p.requirements %}<tr><td>{{ q.description }}</td><td><span class="pill {{ {'cumplido':'verde','incumplido':'rojo','pendiente':'ambar'}[q.status] }}">{{ q.status_label }}</span></td><td class="muted">{{ q.text }}</td></tr>{% endfor %}</tbody></table></div>
+
+  {% elif section == 'datos' %}
+    <h2>Datos del inmueble</h2><p class="muted">Esto es lo que se leyó en cada documento. Puedes ver en qué parte aparece.</p>
+    {% for d in p.data %}<div class="card"><h3>{{ d.label }}</h3>
+      {% if d.rows %}<dl class="kv">{% for r in d.rows %}<dt>{{ r.label }}</dt><dd>{{ r.value }}{% if r.fragment %}<details><summary>Ver en el documento{% if r.page %} (página {{ r.page }}){% endif %}</summary><div class="frag">{{ r.fragment }}</div></details>{% endif %}</dd>{% endfor %}</dl>
+      {% else %}<p class="muted">{{ d.note }}</p>{% endif %}</div>{% endfor %}
+
+  {% elif section == 'seguridad' %}
+    <h2>Seguridad</h2><div class="card">{% for s in security %}<div class="item" style="cursor:default"><span class="pill {{ 'verde' if s.ok else 'gris' }}">{{ icon('check' if s.ok else 'info') }}</span><div class="t"><b>{{ s.name }}</b><span>{{ s.text }}</span></div></div>{% endfor %}</div>
+
+  {% elif section == 'eliminar' %}
+    <h2>Eliminar expediente</h2>
+    <div class="card">{% if error %}<div class="callout rojo">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+      <p>Se borrarán todos los documentos, los resultados y la información de este expediente. <b>No se puede deshacer.</b></p>
+      <button class="btn danger" type="button" onclick="document.getElementById('dlg').showModal()">{{ icon('trash') }} Eliminar expediente</button></div>
+    <dialog id="dlg"><h2>¿Eliminar este expediente?</h2><p class="muted">Se borrará todo de forma definitiva.</p>
+      <form method="post" action="/panel/expedientes/{{ meta.exp_id }}/eliminar"><input type="hidden" name="confirm" value="ELIMINAR">
+        <div class="field"><label for="c">Por seguridad, escribe el código de tu aplicación</label><input id="c" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn sec" type="button" onclick="document.getElementById('dlg').close()">Cancelar</button><button class="btn danger">Sí, eliminar</button></div></form></dialog>
+    {% if error %}<script>document.getElementById('dlg').showModal();</script>{% endif %}
+  {% endif %}
+  </div>
 </div>
-{% else %}<div class="alert ok">No se encontraron puntos que necesiten atención en las revisiones realizadas.</div>{% endfor %}
-
-{% if p.missing %}<h2>Documentos faltantes</h2>
-{% for m in p.missing %}<div class="card finding sev-medium"><b>{{ m.label }}</b><p>{{ m.text }}</p><div class="rec"><b>Qué hacer:</b> {{ m.recommendation }}</div></div>{% endfor %}{% endif %}
-
-<h2>Estado de los documentos</h2>
-{% if p.problem_docs %}<h3 style="font-size:15px;margin:8px 0">Con problemas o pendientes</h3>
-<div class="docgrid">{% for c in p.problem_docs %}<div class="doccard s-{{ c.status }}"><h3>{{ c.label }}</h3>{{ status_badge(c.status, c.status_label) }}<div class="muted" style="margin-top:6px">{{ c.status_help }}</div>
-{% if c.reasons %}<ul>{% for x in c.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}{% if c.files %}<div class="muted" style="margin-top:6px">Archivo: {{ c.files|join(', ') }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
-{% if p.ok_docs %}<h3 style="font-size:15px;margin:14px 0 8px">Correctos</h3>
-<div class="docgrid">{% for c in p.ok_docs %}<div class="doccard s-correcto"><h3>{{ c.label }}</h3>{{ status_badge(c.status, c.status_label) }}<div class="muted" style="margin-top:6px">{{ c.status_help }}</div>{% if c.files %}<div class="muted" style="margin-top:6px">Archivo: {{ c.files|join(', ') }}</div>{% endif %}</div>{% endfor %}</div>{% endif %}
-<p class="muted">«Recibido» significa que el archivo se pudo abrir; no significa que el documento cumpla. El estado de arriba refleja la revisión del contenido.</p>
-
-<h2>Detalle completo de la revisión</h2>
-<details class="card"><summary>Ver requisitos revisados</summary>
-<table><tr><th>Requisito</th><th>Resultado</th><th>Explicación</th></tr>
-{% for q in r.requirements %}<tr><td>{{ q.description }}</td><td><span class="badge {{ {'cumplido':'b-ok','incumplido':'b-err','pendiente':'b-warn'}[q.status] }}">{{ REQ_LABEL[q.status] }}</span></td><td>{{ q.justification }}{{ ev(q.evidence) }}{% if q.rule_level and q.rule_level.startswith('provisional') %}<div class="muted"><span class="badge b-warn">regla provisional</span></div>{% endif %}</td></tr>{% endfor %}</table></details>
-
-<details class="card"><summary>Ver comparación de datos entre documentos</summary>
-<table><tr><th>Dato</th><th>Lo que dice cada documento</th><th>Resultado</th></tr>
-{% for c in r.comparisons %}<tr><td>{{ c.label }}</td><td>{% for v in c['values'] %}<div><b>{{ v.doc }}:</b> {{ v.value }}{{ ev(v.evidence) }}</div>{% else %}<span class="muted">sin datos</span>{% endfor %}</td>
-<td><span class="badge {{ {'igual':'b-ok','distinto':'b-err','indeterminado':'b-warn','sin_comparacion':'b-pend'}[c.result] }}">{{ {'igual':'Coincide','distinto':'No coincide','indeterminado':'Necesita revisión','sin_comparacion':'No se pudo comparar'}[c.result] }}</span></td></tr>{% endfor %}</table></details>
-
-<details class="card"><summary>Ver información leída de cada documento</summary>
-{% for x in r.extractions %}<h4 style="margin:10px 0 4px">{{ DOC_LABELS[x.doc_type] }} · {{ x.filename }}</h4><table>{% for k, f in x.fields.items() if f.status in ('present','ambiguous') %}<tr><td><code>{{ k }}</code></td><td>{{ f.value }}<span class="muted"> · confianza {{ (f.confidence*100)|int }} %</span>{{ ev(f.evidence) }}</td></tr>{% endfor %}</table>{% endfor %}</details>
-
-<details class="card"><summary>Ver detalle técnico del análisis ({{ r.agent_log|length }} pasos · datos comprobados {{ r.audit.stats.verificadas }} de {{ r.audit.stats.evidencias }})</summary>
-<table><tr><th>Agente</th><th>Estado</th><th>Duración</th><th>Cómo trabajó</th><th>Resultado</th></tr>{% for e in r.agent_log %}<tr><td>{{ e.agent_id }} · {{ e.agent_name }}</td><td>{{ e.status }}</td><td>{{ e.duration_ms }} ms</td><td>{{ 'modelo local' if e.used_llm else 'reglas fijas' }}</td><td class="muted">{{ e.output_summary }}</td></tr>{% endfor %}</table>
-<p class="muted">Reglas usadas: versión {{ r.rules_reference.version }} · huella {{ r.rules_reference.sha256[:16] }}… · Tiempos por etapa (ms): {{ r.timings_ms }}</p>
-<p class="muted"><b>Explicación original del Agente 10:</b> {{ r.recommendation.explanation }}</p></details>
 {% endif %}
-
-<h2>Purgar / Destruir expediente</h2>
-<div class="card">{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
-<p class="muted">Elimina originales, copias procesadas, resultados y metadatos, y destruye la clave de cifrado. No se puede deshacer. Requiere confirmación y su código MFA.</p>
-<form method="post" action="/panel/expedientes/{{ meta.exp_id }}/purgar" class="row"><div><label>Escriba PURGAR</label><input name="confirm" autocomplete="off" required></div><div><label>Código MFA</label><input name="code" inputmode="numeric" autocomplete="one-time-code" required></div><div style="flex:0"><button class="danger">Purgar / Destruir expediente</button></div></form></div>
 {% endblock %}

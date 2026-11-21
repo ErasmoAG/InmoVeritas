@@ -1,6 +1,13 @@
-{% extends "base.html" %}{% block title %}Documentos recibidos · InmoVeritas{% endblock %}
+{% extends "base_public.html" %}{% from "_icons.html" import icon %}
 {% block content %}
-<h1>{% if just_sent %}Documentos recibidos{% else %}Este enlace ya fue utilizado{% endif %}</h1>
-<div class="alert ok">Expediente <b>{{ meta.exp_id }}</b>: el envío fue registrado y el análisis inició automáticamente. El equipo legal de Tiendas 3B revisará el resultado.</div>
-<p class="muted">Conserve este identificador como comprobante. Si algún archivo requiere ser reemplazado, el equipo se pondrá en contacto.</p>
+<div class="wrap"><div class="done">
+  <div class="ic">{{ icon('check') }}</div>
+  {% if just_sent %}
+  <h1>¡Listo, recibimos tus documentos!</h1>
+  <p class="lead">El equipo de Tiendas 3B los revisará y se pondrá en contacto contigo si necesita algo más. Ya puedes cerrar esta página.</p>
+  {% else %}
+  <h1>Estos documentos ya fueron enviados</h1>
+  <p class="lead">Este enlace ya se utilizó. Si necesitas enviar algo más, pide un enlace nuevo a la persona de Tiendas 3B que te lo compartió.</p>
+  {% endif %}
+</div></div>
 {% endblock %}

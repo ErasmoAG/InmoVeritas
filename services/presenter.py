@@ -31,7 +31,7 @@ STATUS_HELP = {
     "pendiente": "Todavía no hay información suficiente para evaluarlo.",
 }
 VERDICT_LABEL = {"cumple": "Cumple", "requiere_revision": "Requiere revisión", "no_cumple": "No cumple"}
-SEVERITY_LABEL = {"high": "Importancia alta", "medium": "Importancia media", "low": "Importancia baja"}
+SEVERITY_LABEL = {"high": "Importante", "medium": "A revisar", "low": "Menor"}
 FIELD_LABEL = {"owner": "nombre del propietario", "property_address": "dirección", "address": "dirección", "official_address": "dirección oficial",
                "property_id": "clave o identificación del predio", "land_surface_m2": "superficie del terreno", "registered_surface_m2": "superficie registrada",
                "surface_m2": "superficie", "applicable_surface": "superficie aplicable", "deed_number": "número de escritura", "notary": "notario",
@@ -39,6 +39,19 @@ FIELD_LABEL = {"owner": "nombre del propietario", "property_address": "direcció
                "amount_status": "importe o estado del pago", "official_number": "número oficial", "alignment": "alineamiento", "issue_date": "fecha de emisión",
                "validity": "vigencia", "issuing_authority": "autoridad que emite el documento", "authorized_use": "uso de suelo autorizado",
                "permitted_activities": "actividades permitidas", "restrictions": "restricciones"}
+PROGRESS_STEPS = ["Recibimos los documentos", "Leyendo los documentos", "Identificando cada documento", "Revisando la información",
+                  "Comparando los documentos entre sí", "Verificando los datos", "Preparando el resultado"]
+
+
+def progress_step(stage: str) -> int:
+    """Traduce la etapa interna del analisis a un paso sencillo (0-6). No expone nombres de agentes."""
+    t = (stage or "").lower()
+    for key, idx in (("recib", 0), ("leyendo", 1), ("clasific", 2), ("extray", 3), ("compar", 4), ("valid", 4), ("audit", 5), ("recomend", 6)):
+        if key in t:
+            return idx
+    return 0
+
+
 PROJECT_LABEL = {"store": "tienda comercial", "cedis": "centro de distribución (CEDIS)"}
 CRITICAL_TYPES = {"predial_year_below_min", "document_expired", "land_use_incompatible"}
 
@@ -99,7 +112,7 @@ def _finding_item(result: dict, f: dict, project: Optional[str]) -> Optional[dic
     if t == "predial_year_below_min":
         m = re.search(r"anterior a (\d{4})", desc)
         return {**base, "title": "El predial es de un año anterior al permitido",
-                "text": f"El documento predial corresponde al año {found}. La regla configurada pide un predial del año {m.group(1) if m else 'requerido'} o posterior.",
+                "text": f"El documento predial corresponde al año {found}. El requisito pide un predial del año {m.group(1) if m else 'indicado'} o posterior.",
                 "why": "Con un predial de un año anterior no se cumple el requisito de actualidad.",
                 "recommendation": "Solicitar un documento predial que corresponda al año requerido."}
     if t in ("predial_year_unknown", "land_use_undetermined") and not base["document_types"]:
@@ -186,6 +199,17 @@ def _req_doc_type(req_id: str) -> Optional[str]:
         return "uso_suelo"
     m = re.match(r"(?:VIG|DOC)-(.+)", req_id)
     return m.group(1) if m else None
+
+
+def _clean(text: str) -> str:
+    """Quita referencias internas (reglas, MVP, comité) y palabras técnicas de textos escritos por otros agentes."""
+    t = re.sub(r"\s*\((?:criterio provisional|regla provisional)[^)]*\)", "", text or "")
+    for a, b in (("ejercicio", "año"), ("Ejercicio", "Año"), ("mínimo configurado", "mínimo requerido"), ("regla configurada", "requisito"), ("configurada", "requerida")):
+        t = t.replace(a, b)
+    return t.strip()
+
+
+REQ_STATUS = {"cumplido": "Cumple", "incumplido": "No cumple", "pendiente": "Por confirmar"}
 
 
 def build(result: dict, meta: Optional[dict] = None) -> dict:
@@ -319,6 +343,15 @@ def build(result: dict, meta: Optional[dict] = None) -> dict:
     if verdict != "cumple" and attn:
         final += "Los puntos principales son: " + "; ".join(list(dict.fromkeys(_lower_first(i["title"]) for i in attn))[:3]) + "."
     final += uncertain
+    reqs = [{"description": _clean(q["description"]), "status": q["status"], "status_label": REQ_STATUS[q["status"]], "text": _clean(q["justification"]),
+             "evidence": [{"page": e.get("page"), "fragment": e.get("fragment")} for e in q.get("evidence", [])]} for q in result.get("requirements", [])]
+    data = []
+    for x in result.get("extractions", []):
+        rows = [{"label": FIELD_LABEL.get(k, k), "value": f["value"], "page": (f["evidence"][0].get("page") if f.get("evidence") else None),
+                 "fragment": (f["evidence"][0].get("fragment") if f.get("evidence") else None)} for k, f in x["fields"].items() if f.get("status") == "present" and f.get("value")]
+        data.append({"label": DOC_LABEL.get(x["doc_type"], x["filename"]), "rows": rows, "note": "" if rows else "No se pudo leer información de este documento."})
     return {"verdict": verdict, "verdict_label": VERDICT_LABEL[verdict], "confidence": rec.get("confidence"), "summary": summary, "final_text": final.strip(),
-            "documents": cards, "findings": items, "missing": miss, "problem_docs": [c for c in cards if c["status"] != "correcto"],
-            "ok_docs": [c for c in cards if c["status"] == "correcto"], "disclaimer": rec.get("disclaimer", "")}
+            "documents": cards, "findings": items, "main": [i for i in items if i["severity"] in ("high", "medium")], "minor": [i for i in items if i["severity"] == "low"],
+            "missing": miss, "problem_docs": [c for c in cards if c["status"] != "correcto"], "ok_docs": [c for c in cards if c["status"] == "correcto"],
+            "requirements": reqs, "data": data, "counts": {"ok": sum(c["status"] == "correcto" for c in cards), "problems": sum(c["status"] not in ("correcto", "faltante") for c in cards),
+                                                           "missing": len(miss)}, "disclaimer": rec.get("disclaimer", "")}

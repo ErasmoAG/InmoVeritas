@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Nueva solicitud{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Nueva solicitud</h1><p>Crea un enlace para que la persona envíe sus documentos.</p></div></div>
+<div class="card" style="max-width:640px">
+  {% if error %}<div class="callout rojo">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+  <form method="post" action="/panel/nuevo">
+    <div class="field"><label for="n">Nombre de la persona o empresa</label><input id="n" name="applicant" type="text" maxlength="120" required autofocus placeholder="Ej. Juan Pérez o Inmobiliaria Norte"><div class="hint">Sirve para que identifiques esta solicitud. Quien reciba el enlace no necesita escribirlo.</div></div>
+    <div class="field"><label>¿Para qué es el inmueble?</label>
+      <div class="choice">
+        <div><input type="radio" name="project_type" id="t1" value="store" required><label for="t1"><span>Tienda<small>Nueva tienda comercial</small></span></label></div>
+        <div><input type="radio" name="project_type" id="t2" value="cedis"><label for="t2"><span>Centro de distribución<small>Bodega o CEDIS</small></span></label></div>
+      </div></div>
+    <button class="btn big">Crear enlace</button>
+  </form>
+</div>
+{% endblock %}

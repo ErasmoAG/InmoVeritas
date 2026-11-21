@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Inicio{% endblock %}
+{% macro person(r) %}<a class="item" href="/panel/expedientes/{{ r.exp_id }}"><div class="avatar">{{ (r.applicant or '?')[:1]|upper }}</div>
+  <div class="t"><b>{{ r.applicant }}</b><span>{{ r.project_label }} · {{ (r.submitted_at or r.created_at)[:10] }}</span></div>
+  {% if r.is_new %}<span class="nuevo">Nuevo</span>{% endif %}
+  {% if r.verdict_label %}<span class="pill {{ r.verdict_color }}">{{ r.verdict_label }}</span>{% else %}<span class="pill {{ r.state_color }}">{{ r.state }}</span>{% endif %}</a>{% endmacro %}
+{% block content %}
+<div class="pagehead"><div><h1>Inicio</h1><p>Resumen de las solicitudes de documentos.</p></div><a class="btn" href="/panel/nuevo">{{ icon('plus') }} Nueva solicitud</a></div>
+
+<div class="tiles">
+  <a class="tile {{ 'hot' if c.nuevas }}" href="/panel/expedientes?f=nuevas"><b>{{ c.nuevas }}</b><span>Nuevas por abrir</span></a>
+  <a class="tile" href="/panel/expedientes?f=analizando"><b>{{ c.analizando }}</b><span>Analizándose ahora</span></a>
+  <a class="tile" href="/panel/expedientes?f=revisar"><b>{{ c.revisar }}</b><span>Requieren revisión</span></a>
+  <a class="tile" href="/panel/expedientes?f=cumple"><b style="color:var(--verde)">{{ c.cumplen }}</b><span>Cumplen</span></a>
+  <a class="tile" href="/panel/expedientes?f=no_cumple"><b style="color:var(--rojo)">{{ c.no_cumplen }}</b><span>No cumplen</span></a>
+  <a class="tile" href="/panel/expedientes?f=esperando"><b>{{ c.esperando }}</b><span>Esperando documentos</span></a>
+</div>
+
+<div class="card"><h2>Nuevas solicitudes</h2>
+  {% if new %}<div class="list">{% for r in new %}{{ person(r) }}{% endfor %}</div>
+  {% else %}<div class="empty">{{ icon('check') }}<b>No hay solicitudes nuevas</b>Cuando alguien envíe sus documentos, aparecerá aquí.</div>{% endif %}
+</div>
+
+<div class="card"><h2>Últimos expedientes</h2>
+  {% if recent %}<div class="list">{% for r in recent %}{{ person(r) }}{% endfor %}</div><p style="margin:14px 0 0"><a href="/panel/expedientes">Ver todos los expedientes →</a></p>
+  {% else %}<div class="empty">{{ icon('folder') }}<b>Aún no hay expedientes</b>Crea una solicitud y comparte el enlace con quien va a enviar sus documentos.<br><br><a class="btn" href="/panel/nuevo">Crear la primera solicitud</a></div>{% endif %}
+</div>
+{% endblock %}

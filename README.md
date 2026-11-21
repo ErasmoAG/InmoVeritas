@@ -19,7 +19,8 @@ ollama pull qwen2.5:7b-instruct
 .\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-Abra `http://127.0.0.1:8000/panel`, ingrese con contraseña + código TOTP, genere un enlace de recepción y compártalo.
+Abra `http://127.0.0.1:8000/panel`, entre con contraseña + código, cree una «Nueva solicitud» (nombre y tipo de proyecto) y comparta el enlace o el código QR.
+Si el enlace debe abrirse desde otro equipo, defina `INMO_PUBLIC_URL` (por ejemplo `https://docs.miempresa.com`) en `.env`.
 Pruebas: `.\.venv\Scripts\python.exe -m pytest tests -q` (requieren Ollama y el dataset en `../contexto` para las que lo usan).
 
 ## Arquitectura
@@ -50,6 +51,10 @@ Formulario público /r/{token}  ──►  Recepción técnica (sin LLM)
 
 Cada agente tiene identificador, prompt propio, salida estructurada (Pydantic), reintentos, manejo de errores y registro de ejecución con tiempos
 (visible en el detalle del expediente). A7 y A10 (veredicto) son deterministas a propósito: así las reglas no dependen del criterio del modelo.
+
+## Interfaz
+- **Formulario del cliente** (`/r/{token}`): solo 4 lugares para subir (Escrituras, Predial, Alineamiento y Número Oficial, Uso de Suelo), solo PDF o fotos; sin ZIP, sin datos ni mensajes técnicos. El nombre y el tipo de proyecto los registra el trabajador de 3B al crear la solicitud.
+- **Panel de 3B**: menú lateral (Inicio, Nueva solicitud, Nuevas, Expedientes), enlace + código QR + WhatsApp, aviso de solicitudes nuevas sin abrir y expediente por secciones (Resumen, Observaciones, Documentos, Requisitos, Datos del inmueble, Seguridad, Eliminar). Los requisitos, agentes y detalles técnicos no se muestran; la edición de requisitos queda en `/panel/reglas` (sin enlace en el menú).
 
 ## Resultados en lenguaje sencillo
 `services/presenter.py` es una capa independiente que **solo traduce** el resultado de los agentes a explicaciones claras: situación general, lo que necesita

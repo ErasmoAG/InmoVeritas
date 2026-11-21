@@ -1,8 +1,7 @@
-{% extends "base.html" %}{% block title %}Reglas · InmoVeritas{% endblock %}
+{% extends "base.html" %}{% block title %}Requisitos{% endblock %}
 {% block content %}
-<h1>Reglas configurables</h1>
-<p class="muted">Versión aplicada: <b>{{ ref.version }}</b> · huella {{ ref.sha256[:16] }}… · cargadas {{ ref.loaded_at[:19].replace('T',' ') }}. Los valores vacíos significan «sin criterio oficial»: el sistema los marca como pendientes y no inventa reglas.</p>
-{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}{% if err %}<div class="alert err"><pre style="margin:0;white-space:pre-wrap">{{ err }}</pre></div>{% endif %}
-<form method="post"><textarea name="text" rows="30" style="font-family:Consolas,monospace;font-size:13px">{{ text }}</textarea><br><br><button>Validar y guardar</button> <span class="muted">Si el YAML tiene errores no se guarda nada.</span></form>
-<h2>Historial de actualizaciones</h2>{% if history %}<table><tr><th>Fecha</th><th>Usuario</th><th>Versión</th><th>Huella</th></tr>{% for h in history %}<tr><td>{{ h.updated_at }}</td><td>{{ h.actor }}</td><td>{{ h.version }}</td><td>{{ h.sha256[:16] }}…</td></tr>{% endfor %}</table>{% else %}<p class="muted">Sin actualizaciones registradas.</p>{% endif %}
+<div class="pagehead"><div><h1>Requisitos de revisión</h1><p>Versión {{ ref.version }} · {{ ref.loaded_at[:10] }}</p></div></div>
+{% if msg %}<div class="callout verde"><div>{{ msg }}</div></div>{% endif %}{% if err %}<div class="callout rojo"><pre style="margin:0;white-space:pre-wrap;font:inherit">{{ err }}</pre></div>{% endif %}
+<div class="card"><form method="post"><textarea name="text" rows="28" style="font-family:Consolas,monospace;font-size:13px">{{ text }}</textarea><br><br><button class="btn">Validar y guardar</button></form></div>
+{% if history %}<div class="card"><h2>Cambios anteriores</h2><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Versión</th></tr></thead><tbody>{% for h in history %}<tr><td>{{ h.updated_at }}</td><td>{{ h.actor }}</td><td>{{ h.version }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 {% endblock %}

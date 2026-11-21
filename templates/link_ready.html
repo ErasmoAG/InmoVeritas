@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% from "_icons.html" import icon %}{% block title %}Enlace listo{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Enlace listo</h1><p>Compártelo con {{ meta.applicant }}.</p></div><a class="btn sec" href="/panel/nuevo">{{ icon('plus') }} Crear otra solicitud</a></div>
+<div class="callout verde">{{ icon('check') }}<div><b>La solicitud se creó.</b> Cuando {{ meta.applicant }} envíe los documentos, el análisis empieza solo y te avisaremos en «Nuevas».</div></div>
+{% if local_only %}<div class="callout ambar">{{ icon('info') }}<div>Este enlace solo abre en esta computadora. Para que otra persona lo use, el sistema debe estar publicado en internet o en la red de la empresa. Pide ayuda a Sistemas.</div></div>{% endif %}
+<div class="two">
+  <div class="card"><h2>Enlace</h2>
+    <div class="linkbox"><input type="text" id="lk" value="{{ link }}" readonly onclick="this.select()"><button class="btn" id="cp" type="button">{{ icon('copy') }} Copiar</button></div>
+    <p class="hint" style="margin:10px 0 18px">Funciona durante 7 días. Quien lo abra solo verá el formulario para subir sus documentos.</p>
+    <a class="btn sec" href="{{ wa }}" target="_blank" rel="noopener">{{ icon('share') }} Enviar por WhatsApp</a>
+  </div>
+  <div class="card qrbox"><h2>Código QR</h2><img src="/panel/qr/{{ meta.exp_id }}.png" alt="Código QR del enlace"><p class="hint" style="margin:10px 0 14px">Se abre con la cámara del celular.</p>
+    <a class="btn sec" href="/panel/qr/{{ meta.exp_id }}.png" download="qr-{{ meta.applicant|replace(' ', '-') }}.png">Descargar QR</a></div>
+</div>
+<script>document.getElementById('cp').onclick=function(){var i=document.getElementById('lk');i.select();(navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.resolve(document.execCommand('copy'))).then(function(){var b=document.getElementById('cp');var t=b.innerHTML;b.textContent='¡Copiado!';setTimeout(function(){b.innerHTML=t},1500)})};</script>
+{% endblock %}
