@@ -71,7 +71,7 @@ términos de búsqueda de uso de suelo (no son categorías jurídicas).
 
 ## Seguridad: qué sí y qué NO
 - Sí: AES-256-GCM por expediente (clave aleatoria, nonce único, AAD por expediente), clave del expediente envuelta con la clave maestra y guardada aparte,
-  MFA TOTP (secreto cifrado), contraseñas con bcrypt, bloqueo por intentos, enlaces firmados con vencimiento (7 días), purga con confirmación + MFA y constancia
+  MFA TOTP (secreto cifrado), contraseñas con bcrypt, bloqueo por intentos, enlaces firmados con vencimiento (7 días), purga con confirmación explícita (desde una sesión ya verificada con contraseña + código) y constancia
   sin datos personales, OCR y LLM locales (ningún documento sale del equipo).
 - Limitaciones del MVP (no es seguridad de nivel empresarial): la clave maestra está en `.env` en el mismo equipo (no hay KMS/HSM); los bloqueos por intentos y el progreso
   viven en memoria; el formulario público no tiene límite de tasa ni CAPTCHA; no hay HTTPS propio (use un proxy con TLS si se expone en red); el texto extraído se descifra en

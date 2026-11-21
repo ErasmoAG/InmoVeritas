@@ -293,12 +293,11 @@ def status_json(exp_id: str, user: str = Depends(lawyer)):
 
 
 @app.post("/panel/expedientes/{exp_id}/eliminar")
-def purge(request: Request, exp_id: str, user: str = Depends(lawyer), code: str = Form(""), confirm: str = Form("")):
+def purge(request: Request, exp_id: str, user: str = Depends(lawyer), confirm: str = Form("")):
     from urllib.parse import quote
+    # La sesion ya paso contrasena + codigo; aqui basta la confirmacion explicita.
     if confirm != "ELIMINAR":
         return RedirectResponse(f"/panel/expedientes/{exp_id}?s=eliminar&error={quote('Confirma que quieres eliminarlo.')}", status_code=303)
-    if not auth.verify_totp(user, code):
-        return RedirectResponse(f"/panel/expedientes/{exp_id}?s=eliminar&error={quote('El código no es correcto. Intenta de nuevo.')}", status_code=303)
     receipt = purge_expediente(get_store().enc, exp_id)
     return templates.TemplateResponse(request, "purged.html", {"user": user, "nav": "expedientes", "receipt": receipt})
 

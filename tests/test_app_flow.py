@@ -156,7 +156,7 @@ def test_estado_del_analisis_usa_pasos_sencillos(env):
     assert "Leyendo los documentos" in page and "Preparando el resultado" in page and "Agente" not in page
 
 
-def test_archivos_cifrados_y_eliminacion_con_confirmacion_y_codigo(env):
+def test_archivos_cifrados_y_eliminacion_solo_con_confirmacion(env):
     client, secret, calls, fs = env
     login(client, secret)
     exp_id, token = new_link(client, fs)
@@ -167,10 +167,13 @@ def test_archivos_cifrados_y_eliminacion_con_confirmacion_y_codigo(env):
     blobs = [p for p in d.rglob("*") if p.is_file()]
     assert blobs and all(p.suffix == ".enc" for p in blobs) and all(b"JUAN PEREZ" not in p.read_bytes() for p in blobs)
     url = f"/panel/expedientes/{exp_id}/eliminar"
-    assert "Confirma" in client.post(url, data={"confirm": "no", "code": pyotp.TOTP(secret).now()}).headers["location"].replace("+", " ").replace("%20", " ")
-    assert "no%20es%20correcto" in client.post(url, data={"confirm": "ELIMINAR", "code": "123456"}).headers["location"]
-    assert store.enc.has_key(exp_id)                              # nada se borro sin confirmacion + codigo
-    r = client.post(url, data={"confirm": "ELIMINAR", "code": pyotp.TOTP(secret).now()})
+    assert "Confirma" in client.post(url, data={"confirm": "no"}).headers["location"].replace("+", " ").replace("%20", " ")
+    assert store.enc.has_key(exp_id)                              # nada se borro sin confirmar
+    assert TestClient(client.app, follow_redirects=False).post(url, data={"confirm": "ELIMINAR"}).status_code == 303   # sin sesion no se puede
+    assert store.enc.has_key(exp_id)
+    html = client.get(f"/panel/expedientes/{exp_id}?s=eliminar").text
+    assert 'name="code"' not in html                              # el cuadro de confirmacion ya no pide codigo
+    r = client.post(url, data={"confirm": "ELIMINAR"})
     assert r.status_code == 200 and "Expediente eliminado" in r.text
     assert not d.exists() and not store.enc.has_key(exp_id)
     assert client.get(f"/panel/expedientes/{exp_id}").status_code == 404

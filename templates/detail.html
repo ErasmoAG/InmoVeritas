@@ -77,7 +77,6 @@ if(j.status==='analizado'||j.status==='error'||j.status==='purgado'){location.re
       <button class="btn danger" type="button" onclick="document.getElementById('dlg').showModal()">{{ icon('trash') }} Eliminar expediente</button></div>
     <dialog id="dlg"><h2>¿Eliminar este expediente?</h2><p class="muted">Se borrará todo de forma definitiva.</p>
       <form method="post" action="/panel/expedientes/{{ meta.exp_id }}/eliminar"><input type="hidden" name="confirm" value="ELIMINAR">
-        <div class="field"><label for="c">Por seguridad, escribe el código de tu aplicación</label><input id="c" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required></div>
         <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn sec" type="button" onclick="document.getElementById('dlg').close()">Cancelar</button><button class="btn danger">Sí, eliminar</button></div></form></dialog>
     {% if error %}<script>document.getElementById('dlg').showModal();</script>{% endif %}
   {% endif %}
